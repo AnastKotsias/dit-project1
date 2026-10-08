@@ -18,6 +18,17 @@ struct Args {
     std::string out_file = "output.txt";
     int seed = 1;
     std::string method = "exact";
+
+    // method specific parameters
+    int lsh_k = 4;
+    int lsh_l = 5;
+    double w = 0.05;
+    int hyper_kproj = 10;
+    int hyper_probes = 10;
+    int ivf_kclusters = 0;  // to dynamically calculate sqrt(n) later
+    int ivf_nprobe = 5;
+    int m_param = -1;   // to handle default 500 for hypercube or 16 for pq later
+    int pq_nbits = 8;
 };
 
 // helper to safely parse ints and avoid stoi exceptions
@@ -32,6 +43,22 @@ int parse_int(const std::string& arg_name, const std::string& val_str) {
         return val;
     } catch(const std::exception&) {
         std::cerr << "error: invalid integer value for " << arg_name << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+// helper to safely parse doubles
+double parse_double(const std::string& arg_name, const std::string& val_str) {
+    try {
+        size_t pos;
+        double val = std::stod(val_str, &pos);
+        // rejecting partial matches
+        if(pos != val_str.length()) {
+            throw std::invalid_argument("trailing characters");
+        }
+        return val;
+    } catch(const std::exception&) {
+        std::cerr << "error: invalid double value for " << arg_name << "\n";
         std::exit(EXIT_FAILURE);
     }
 }

@@ -7,10 +7,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(OpenCV REQUIRED)
 
-add_executable(search-hp
+add_executable(search
     src/main.cpp
     src/image_features.cpp
 )
 
-target_include_directories(search-hp PRIVATE include)
-target_link_libraries(search-hp PRIVATE ${OpenCV_LIBS})
+target_include_directories(search PRIVATE include)
+target_link_libraries(search PRIVATE ${OpenCV_LIBS})
