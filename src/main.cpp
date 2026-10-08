@@ -72,7 +72,10 @@ Args parse_args(int argc, char** argv) {
         // checking if the argument needs a value
         bool needs_val = (arg == "-hp" || arg == "-mir" || arg == "-split" ||
                         arg == "-vocab" || arg == "-S" || arg == "-D" ||
-                        arg == "-set" || arg == "-o" || arg == "-seed");
+                        arg == "-set" || arg == "-o" || arg == "-seed" ||
+                        arg == "-k" || arg == "-L" || arg == "-w" ||
+                        arg == "-kproj" || arg == "-M" || arg == "-probes" ||
+                        arg == "-kclusters" || arg == "-nprobe" || arg == "-nbits");
 
         // preventing out of bounds if the value is missing
         if(needs_val && i + 1 >= argc) {
@@ -80,6 +83,7 @@ Args parse_args(int argc, char** argv) {
             std::exit(EXIT_FAILURE);
         }
 
+        // core arguments
         if(arg == "-hp" && i + 1 < argc) args.hp_path = argv[++i];
         else if(arg == "-mir" && i + 1 < argc) args.mir_path = argv[++i];
         else if(arg == "-split" && i + 1 < argc) args.split_file = argv[++i];
@@ -89,8 +93,27 @@ Args parse_args(int argc, char** argv) {
         else if(arg == "-set" && i + 1 < argc) args.set_type = argv[++i];
         else if(arg == "-o" && i + 1 < argc) args.out_file = argv[++i];
         else if(arg == "-seed" && i + 1 < argc) args.seed = parse_int(arg, argv[++i]);
-        else if(arg == "-exact") args.method = "exact";
-        // adding lsh, hypercube, ivfflat, ivfpq parsing later
+        
+        // method selection
+        else if(arg == "-exact" || arg == "-lsh" || arg == "-hypercube" || arg == "ivfflat" || arg == "-ivfpq") {
+            if(!args.method.empty()) {
+                std::cerr << "error: multiple methods flags provided\n";
+                std::exit(EXIT_FAILURE);
+            }
+            args.method = arg.substr(1);
+        }
+
+        // method specific arguments
+        else if(arg == "-k" && i + 1 < argc) args.lsh_k = parse_int(arg, argv[++i]);
+        else if(arg == "-L" && i + 1 < argc) args.lsh_l = parse_int(arg, argv[++i]);
+        else if(arg == "-w" && i + 1 < argc) args.w = parse_double(arg, argv[++i]);
+        else if(arg == "-kproj" && i + 1 < argc) args.hyper_kproj = parse_int(arg, argv[++i]);
+        else if(arg == "-probes" && i + 1 < argc) args.hyper_probes = parse_int(arg, argv[++i]);
+        else if(arg == "-kclusters" && i + 1 < argc) args.ivf_kclusters = parse_int(arg, argv[++i]);
+        else if(arg == "-nprobe" && i + 1 < argc) args.ivf_nprobe = parse_int(arg, argv[++i]);
+        else if(arg == "-M" && i + 1 < argc) args.m_param = parse_int(arg, argv[++i]);
+        else if(arg == "-nbits" && i + 1 < argc) args.pq_nbits = parse_int(arg, argv[++i]);
+
         else {
             std::cerr << "error: unknown argument " << arg << "\n";
             std::exit(EXIT_FAILURE);
@@ -102,23 +125,42 @@ Args parse_args(int argc, char** argv) {
         std::cerr << "error: missing required arguments (-hp, -mir, -split, -o, -vocab)\n";
         std::exit(EXIT_FAILURE);
     }
+    if(args.method.empty()) {
+        std::cerr << "error: exactly one search method flag is required\n";
+        std::exit(EXIT_FAILURE);
+    }
 
     // validating numeric ranges and set types
-    if(args.vocab <= 0) {
-        std::cerr << "error: -vocab must be strictly positive\n";
-        std::exit(EXIT_FAILURE);
-    }
-    if(args.s_max <= 0) {
-        std::cerr << "error: -S must be strictly positive\n";
-        std::exit(EXIT_FAILURE);
-    }
-    if(args.d_mir < 0) {
-        std::cerr << "error: -D cannot be negative\n";
+    if(args.vocab <= 0 || args.s_max <= 0 || args.d_mir <= 0) {
+        std::cerr << "error: -vocab, -S, and -D must be strictly positive\n";
         std::exit(EXIT_FAILURE);
     }
     if(args.set_type != "validation" && args.set_type != "test") {
         std::cerr << "error: -set must be either validation or test\n";
         std::exit(EXIT_FAILURE);
+    }
+
+    // validating method specific parameters
+    if(args.lsh_k <= 0 || args.lsh_l <= 0 || args.w <= 0.0 || args.hyper_kproj <= 0 ||
+        args.hyper_probes <= 0 || args.ivf_nprobe <= 0 || args.pq_nbits <= 0) {
+        std::cerr << "error: method parameters (k, L, w, kproj, probes, nprobe, nbits) must be strictly positive\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    // checking optional parameters that have dynamic default calculation flags
+    if(args.ivf_kclusters != -1 && args.ivf_kclusters <= 0) {
+        std::cerr << "error: -kclusters must be strictly positive\n";
+        std::exit(EXIT_FAILURE);
+    }
+    if(args.m_param != -1 && args.m_param <= 0) {
+        std::cerr << "error: -M must be strictly positive\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    // resolving method specific defaults for M
+    if(args.m_param == -1) {
+        if(args.method == "hypercube") args.m_param = 500;
+        else if(args.method == "ivfpq") args.m_param = 16;
     }
 
     return args;
