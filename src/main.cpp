@@ -110,7 +110,7 @@ Args parse_args(int argc, char** argv) {
             args.method = arg.substr(1);
         }
 
-        // method specific argument
+        // method specific arguments
         else if(arg == "-k" && i + 1 < argc) { args.lsh_k = parse_int(arg, argv[++i]); has_k = true; }
         else if(arg == "-L" && i + 1 < argc) { args.lsh_l = parse_int(arg, argv[++i]); has_l = true; }
         else if(arg == "-w" && i + 1 < argc) { args.w = parse_double(arg, argv[++i]); has_w = true; }
