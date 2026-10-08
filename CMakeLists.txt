@@ -8,6 +8,7 @@ find_package(OpenCV REQUIRED)
 
 add_executable(search-hp
     src/main.cpp
+    src/image_features.cpp
 )
 
 target_include_directories(search-hp PRIVATE include)
