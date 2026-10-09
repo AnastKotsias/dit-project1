@@ -26,15 +26,15 @@ Example of program execution:
 ./build/search -hp path/to/hpatches -mir path/to/mirflickr -split split.txt -vocab 256 -S 500 -D 10000 -set validation -o output.txt -ivfflat -kclusters 100 -nprobe 10 -seed 1
 ```
 Where,
--hp <path>: Directory containing the HPatches dataset
--mir <path>: Directory containing the MIRFlickr-25K dataset
--split <file>: Split file (training, validation, test)
--vocab <int>: Number K of k-means clusters (visual vocabulary)
--S <int>: Maximum number of SIFT descriptors per training image
--D <int>: Number of MIRFlickr images used as distractors
--set <validation|test>: Selection of query sets
--o <output file>: Output file for results
--seed <int>: Pseudo-random number seed
+- -hp <path>: Directory containing the HPatches dataset
+- -mir <path>: Directory containing the MIRFlickr-25K dataset
+- -split <file>: Split file (training, validation, test)
+- -vocab <int>: Number K of k-means clusters (visual vocabulary)
+- -S <int>: Maximum number of SIFT descriptors per training image
+- -D <int>: Number of MIRFlickr images used as distractors
+- -set <validation|test>: Selection of query sets
+- -o <output file>: Output file for results
+- -seed <int>: Pseudo-random number seed
 
 Method parameters:
--k, -L, -w, -kproj, -probes, -kclusters, -nprobe, -M, -nbits
+- -k, -L, -w, -kproj, -probes, -kclusters, -nprobe, -M, -nbits
