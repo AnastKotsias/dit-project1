@@ -43,7 +43,16 @@ cv::Mat compute_visual_vocabulary(
     cv::Mat labels;
     cv::TermCriteria criteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 100, 1e-4);
 
-    }
+    // running opencv kmeans with kmeanspp initialization
+    cv::kmeans(
+        all_descriptors,
+        vocab_size,
+        labels,
+        criteria,
+        3,
+        cv::KMEANS_PP_CENTERS,
+        centers
+    );
 
-
+    return centers;
 }
