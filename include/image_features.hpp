@@ -19,7 +19,9 @@ struct SiftExtractionResult {
 };
 
 SiftExtractionResult extract_sift_descriptors(
-    const std::filesystem::path& image_path);
+    const std::filesystem::path& image_path,
+    int max_features = 0,
+    int seed = 1);
 
 }  // namespace image_search
 
