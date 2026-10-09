@@ -1,5 +1,6 @@
 #include "vocabulary.hpp"
 #include <opencv2/ml.hpp>
+#include <opencv2/features2d.hpp>
 #include <stdexcept>
 #include <cmath>
 
@@ -105,21 +106,14 @@ std::vector<double> compute_image_bow_histogram(
         throw std::invalid_argument("descriptor dimension does not match vocabulary dimension");
     }
 
-    int n_descriptors = descriptors.rows;
-    for(int i = 0 ; i < n_descriptors ; ++i) {
-        cv::Mat desc = descriptors.row(i);
-        double min_dist = -1.0;
-        int best_cluster = 0;
+    // using opencv brute force matcher for optimized nearest neighbor search
+    cv::BFMatcher matcher(cv::NORM_L2);
+    std::vector<cv::DMatch> matches;
+    matcher.match(descriptors, vocabulary, matches);
 
-        for(int j = 0 ; j < vocab_size ; ++j) {
-            cv::Mat center = vocabulary.row(j);
-            double dist = cv::norm(desc, center, cv::NORM_L2);
-            if(min_dist < 0 || dist < min_dist) {
-                min_dist = dist;
-                best_cluster = j;
-            }
-        }
-        histogram[best_cluster] += 1.0;
+    int n_descriptors = descriptors.rows;
+    for(const auto& match : matches) {
+        histogram[match.trainIdx] += 1.0;
     }
 
     // normalizing histogram by total descriptors count
