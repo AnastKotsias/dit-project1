@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <cmath>
+#include <set>
 
 // holds parsed arguments
 struct Args {
@@ -67,6 +68,7 @@ double parse_double(const std::string& arg_name, const std::string& val_str) {
 // parsing arguments from command line
 Args parse_args(int argc, char** argv) {
     Args args;
+    std::set<std::string> seen_args;
 
     // tracking provided optional arguments to restrict them by method
     bool has_k = false, has_l = false, has_w = false, has_kproj = false;
@@ -75,6 +77,13 @@ Args parse_args(int argc, char** argv) {
 
     for(int i=1 ; i<argc ; ++i) {
         std::string arg = argv[i];
+
+        // checking for duplicate arguments to prevent silent overwriting
+        if(seen_args.count(arg)) {
+            std::cerr << "error: repeated argument " << arg << "\n";
+            std::exit(EXIT_FAILURE);
+        }
+        seen_args.insert(arg);
 
         // checking if the argument needs a value
         bool needs_val = (arg == "-hp" || arg == "-mir" || arg == "-split" ||
@@ -224,15 +233,36 @@ std::map<std::string, std::vector<std::string>> load_splits(const std::string& f
 
     std::string sequence, subset;
     while(file >> sequence >> subset) {
+        // validating subset names 
+        if(subset != "train" && subset != "validation" && subset != "test") {
+            std::cerr << "error: invalid subset name " << subset << " in split file\n";
+            std::exit(EXIT_FAILURE);
+        }
         splits[subset].push_back(sequence);
     }
+
+    // confirming presence of all required sets
+    if(splits["train"].empty() || splits["validation"].empty() || splits["test"].empty()) {
+        std::cerr << "error: split file missing one or more required sets\n";
+        std::exit(EXIT_FAILURE);
+    }
+
     return splits;
 }
 
 int main(int argc, char** argv) {
     Args args = parse_args(argc, argv);
+    
+    // verifying output path is writable early
+    std::ofstream out(args.out_file);
+    if(!out.is_open()) {
+        std::cerr << "error: could not open output file " << args.out_file << " for writing\n";
+        std::exit(EXIT_FAILURE);
+    }
+    out.close();
+    
     auto splits = load_splits(args.split_file);
-
     std::cout << "loaded " << splits["train"].size() << " training sequences\n";
+    
     return 0;
 }
