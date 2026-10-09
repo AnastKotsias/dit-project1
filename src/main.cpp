@@ -9,6 +9,11 @@
 #include <set>
 #include <optional>
 #include <sstream>
+#include <random>
+
+#include "dataset.hpp"
+#include "image_features.hpp"
+#include "vocabulary.hpp"
 
 // holds parsed arguments
 struct Args {
@@ -257,5 +262,33 @@ int main(int argc, char** argv) {
     auto splits = load_splits(args.split_file);
     std::cout << "loaded " << splits["train"].size() << " training sequences\n";
     
-    return 0;
+    // resolving paths for training images
+    auto train_paths = image_search::get_training_image_paths(args.hp_path, splits["train"]);
+    std::cout << "found " << train_paths.size() << " training images\n";
+
+    // setting up random number generator for sampling
+    std::mt19937 rng(args.seed);
+    std::vector<cv::Mat> sampled_train_descriptors;
+
+    std::cout << "extracting and sampling sift descriptors for vocabulary...\n";
+    for(const auto& path : train_paths) {
+        auto result = image_search::extract_sift_descriptors(path);
+
+        // skipping images that failed to produce descriptors
+        if(result.status == image_search::SiftExtractionStatus::Success) {
+            auto sampled = image_search::sample_training_descriptors(result.descriptors, args.s_max, rng);
+            sampled_train_descriptors.push_back(sampled);
+        }
+    }
+
+    std::cout << "computing visual vocabulary with k=" << args.vocab << "...\n";
+    cv::Mat vocabulary = image_search::compute_visual_vocabulary(sampled_train_descriptors, args.vocab, args.seed);
+
+    if(vocabulary.empty()) {
+        std::cerr << "error: failed to compute vocabulary\n";
+        return EXIT_FAILURE;
+    }
+    std::cout << "vocabulary computed successfully\n";
+
+    return EXIT_SUCCESS;
 }

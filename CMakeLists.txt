@@ -11,6 +11,7 @@ add_executable(search
     src/main.cpp
     src/image_features.cpp
     src/vocabulary.cpp
+    src/dataset.cpp
 )
 
 target_include_directories(search PRIVATE include)
