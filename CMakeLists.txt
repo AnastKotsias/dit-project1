@@ -10,6 +10,7 @@ find_package(OpenCV REQUIRED)
 add_executable(search
     src/main.cpp
     src/image_features.cpp
+    src/vocabulary.cpp
 )
 
 target_include_directories(search PRIVATE include)
