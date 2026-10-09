@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <cmath>
 #include <set>
+#include <optional>
+#include <sstream>
 
 // holds parsed arguments
 struct Args {
@@ -68,67 +70,54 @@ double parse_double(const std::string& arg_name, const std::string& val_str) {
 // parsing arguments from command line
 Args parse_args(int argc, char** argv) {
     Args args;
-    std::set<std::string> seen_args;
+    std::set<std::string> parsed_options;
 
-    // tracking provided optional arguments to restrict them by method
-    bool has_k = false, has_l = false, has_w = false, has_kproj = false;
-    bool has_probes = false, has_kclusters = false, has_nprobe = false;
-    bool has_m = false, has_nbits = false;
-
-    for(int i=1 ; i<argc ; ++i) {
+    for(int i = 1 ; i < argc ; ++i) {
         std::string arg = argv[i];
 
         // checking for duplicate arguments to prevent silent overwriting
-        if(seen_args.count(arg)) {
-            std::cerr << "error: repeated argument " << arg << "\n";
+        if(parsed_options.count(arg)) {
+            std::cerr << "error: duplicate argument " << arg << "\n";
             std::exit(EXIT_FAILURE);
         }
-        seen_args.insert(arg);
-
-        // checking if the argument needs a value
-        bool needs_val = (arg == "-hp" || arg == "-mir" || arg == "-split" ||
-                        arg == "-vocab" || arg == "-S" || arg == "-D" ||
-                        arg == "-set" || arg == "-o" || arg == "-seed" ||
-                        arg == "-k" || arg == "-L" || arg == "-w" ||
-                        arg == "-kproj" || arg == "-M" || arg == "-probes" ||
-                        arg == "-kclusters" || arg == "-nprobe" || arg == "-nbits");
-
-        // preventing out of bounds if the value is missing
-        if(needs_val && i + 1 >= argc) {
-            std::cerr << "error: missing value for argument " << arg << "\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        // core arguments
-        if(arg == "-hp" && i + 1 < argc) args.hp_path = argv[++i];
-        else if(arg == "-mir" && i + 1 < argc) args.mir_path = argv[++i];
-        else if(arg == "-split" && i + 1 < argc) args.split_file = argv[++i];
-        else if(arg == "-vocab" && i + 1 < argc) args.vocab = parse_int(arg, argv[++i]);
-        else if(arg == "-S" && i + 1 < argc) args.s_max = parse_int(arg, argv[++i]);
-        else if(arg == "-D" && i + 1 < argc) args.d_mir = parse_int(arg, argv[++i]);
-        else if(arg == "-set" && i + 1 < argc) args.set_type = argv[++i];
-        else if(arg == "-o" && i + 1 < argc) args.out_file = argv[++i];
-        else if(arg == "-seed" && i + 1 < argc) args.seed = parse_int(arg, argv[++i]);
         
-        // method selection
-        else if(arg == "-exact" || arg == "-lsh" || arg == "-hypercube" || arg == "-ivfflat" || arg == "-ivfpq") {
+        bool is_method = (arg == "-exact" || arg == "-lsh" || arg == "-hypercube" || arg == "-ivfflat" || arg == "-ivfpq");
+        if(is_method) {
             if(!args.method.empty()) {
                 std::cerr << "error: multiple methods flags provided\n";
                 std::exit(EXIT_FAILURE);
             }
             args.method = arg.substr(1);
+            continue;
+        }
+        parsed_options.insert(arg);
+
+        if(i + 1 >= argc) {
+            std::cerr << "error: missing value for argument " << arg << "\n";
+            std::exit(EXIT_FAILURE);
         }
 
+        // core arguments
+        if(arg == "-hp") args.hp_path = argv[++i];
+        else if(arg == "-mir") args.mir_path = argv[++i];
+        else if(arg == "-split") args.split_file = argv[++i];
+        else if(arg == "-vocab") args.vocab = parse_int(arg, argv[++i]);
+        else if(arg == "-S") args.s_max = parse_int(arg, argv[++i]);
+        else if(arg == "-D") args.d_mir = parse_int(arg, argv[++i]);
+        else if(arg == "-set") args.set_type = argv[++i];
+        else if(arg == "-o") args.out_file = argv[++i];
+        else if(arg == "-seed") args.seed = parse_int(arg, argv[++i]);
+
         // method specific arguments
-        else if(arg == "-k" && i + 1 < argc) { args.lsh_k = parse_int(arg, argv[++i]); has_k = true; }
-        else if(arg == "-L" && i + 1 < argc) { args.lsh_l = parse_int(arg, argv[++i]); has_l = true; }
-        else if(arg == "-w" && i + 1 < argc) { args.w = parse_double(arg, argv[++i]); has_w = true; }
-        else if(arg == "-kproj" && i + 1 < argc) { args.hyper_kproj = parse_int(arg, argv[++i]); has_kproj = true; }
-        else if(arg == "-probes" && i + 1 < argc) { args.hyper_probes = parse_int(arg, argv[++i]); has_probes = true; }
-        else if(arg == "-kclusters" && i + 1 < argc) { args.ivf_kclusters = parse_int(arg, argv[++i]); has_kclusters = true; }
-        else if(arg == "-nprobe" && i + 1 < argc) { args.ivf_nprobe = parse_int(arg, argv[++i]); has_nprobe = true; }
-        else if(arg == "-M" && i + 1 < argc) { args.m_param = parse_int(arg, argv[++i]); has_m = true; }
-        else if(arg == "-nbits" && i + 1 < argc) { args.pq_nbits = parse_int(arg, argv[++i]); has_nbits = true; }
+        else if(arg == "-k") args.lsh_k = parse_int(arg, argv[++i]);
+        else if(arg == "-L") args.lsh_l = parse_int(arg, argv[++i]);
+        else if(arg == "-w") args.w = parse_double(arg, argv[++i]);
+        else if(arg == "-kproj") args.hyper_kproj = parse_int(arg, argv[++i]);
+        else if(arg == "-probes") args.hyper_probes = parse_int(arg, argv[++i]);
+        else if(arg == "-kclusters") args.ivf_kclusters = parse_int(arg, argv[++i]);
+        else if(arg == "-nprobe") args.ivf_nprobe = parse_int(arg, argv[++i]);
+        else if(arg == "-M") args.m_param = parse_int(arg, argv[++i]);
+        else if(arg == "-nbits") args.pq_nbits = parse_int(arg, argv[++i]);
 
         else {
             std::cerr << "error: unknown argument " << arg << "\n";
@@ -146,32 +135,29 @@ Args parse_args(int argc, char** argv) {
         std::exit(EXIT_FAILURE);
     }
 
-    // restricting unused parameters depending on the chosed method
-    if(args.method == "exact") {
-        if(has_k || has_l || has_w || has_kproj || has_probes || has_kclusters || has_nprobe || has_m || has_nbits) {
-            std::cerr << "error: exact search does not accept method-specific parameters\n";
-            std::exit(EXIT_FAILURE);
-        }
-    } else if(args.method == "lsh") {
-        if(has_kproj || has_probes || has_kclusters || has_nprobe || has_m || has_nbits) {
-            std::cerr << "error: invalid parameters for lsh search\n";
-            std::exit(EXIT_FAILURE);
-        }
-    } else if(args.method == "hypercube") {
-        if(has_k || has_l || has_kclusters || has_nprobe || has_nbits) {
-            std::cerr << "error: invalid parameters for hypercube search\n";
-            std::exit(EXIT_FAILURE);
-        }
-    } else if(args.method == "ivfflat") {
-        if(has_k || has_l || has_w || has_kproj || has_probes || has_m || has_nbits) {
-            std::cerr << "error: invalid parameters for ivfflat search\n";
-            std::exit(EXIT_FAILURE);
-        }
-    } else if(args.method == "ivfpq") {
-        if(has_k || has_l || has_w || has_kproj || has_probes) {
-            std::cerr << "error: invalid parameters for ivfpq search\n";
-            std::exit(EXIT_FAILURE);
-        }
+    if(args.method == "exact" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
+                                parsed_options.count("-kproj") || parsed_options.count("-probes") || parsed_options.count("-kclusters") ||
+                                parsed_options.count("-nprobe") || parsed_options.count("-M") || parsed_options.count("-nbits"))) {
+        std::cerr << "error: exact search does not accept method-specific parameters\n";
+        std::exit(EXIT_FAILURE);
+    } else if(args.method == "lsh" && (parsed_options.count("-kproj") || parsed_options.count("-probes") || parsed_options.count("-kclusters") ||
+                                parsed_options.count("-nprobe") || parsed_options.count("-M") || parsed_options.count("-nbits"))) {
+        std::cerr << "error: invalid parameters for lsh search\n";
+        std::exit(EXIT_FAILURE);
+    } else if(args.method == "hypercube" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
+                                parsed_options.count("-kclusters") ||
+                                parsed_options.count("-nprobe") || parsed_options.count("-nbits"))) {
+        std::cerr << "error: invalid parameters for hypercube search\n";
+        std::exit(EXIT_FAILURE);
+    } else if(args.method == "ivfflat" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
+                                parsed_options.count("-kproj") || parsed_options.count("-probes") || parsed_options.count("-M") ||
+                                parsed_options.count("-nbits"))) {
+        std::cerr << "error: invalid parameters for ivfflat search\n";
+        std::exit(EXIT_FAILURE);
+    } else if(args.method == "ivfpq" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
+                                parsed_options.count("-kproj") || parsed_options.count("-probes"))) {
+        std::cerr << "error: invalid parameters for ivfpq search\n";
+        std::exit(EXIT_FAILURE);
     }
 
     // validating numeric ranges and set types
@@ -223,6 +209,7 @@ Args parse_args(int argc, char** argv) {
 // loading train validation test splits
 std::map<std::string, std::vector<std::string>> load_splits(const std::string& filename) {
     std::map<std::string, std::vector<std::string>> splits;
+    std::set<std::string> seen_seqs;
     std::ifstream file(filename);
 
     // checking explicitly if file exists and is open
@@ -231,19 +218,33 @@ std::map<std::string, std::vector<std::string>> load_splits(const std::string& f
         std::exit(EXIT_FAILURE);
     }
 
-    std::string sequence, subset;
-    while(file >> sequence >> subset) {
-        // validating subset names 
+    std::string line;
+    while(std::getline(file, line)) {
+        if(line.empty()) continue;
+
+        std::istringstream iss(line);
+        std::string sequence, subset, extra;
+
+        if(!(iss >> sequence >> subset) || (iss >> extra)) {
+            std::cerr << "error: malformed line in split file: " << line << "\n";
+            std::exit(EXIT_FAILURE);
+        }
+
         if(subset != "train" && subset != "validation" && subset != "test") {
             std::cerr << "error: invalid subset name " << subset << " in split file\n";
             std::exit(EXIT_FAILURE);
         }
+
+        if(!seen_seqs.insert(sequence).second) {
+            std::cerr << "error: duplicate sequence " << sequence << " in split file\n";
+            std::exit(EXIT_FAILURE);
+        }
+
         splits[subset].push_back(sequence);
     }
 
-    // confirming presence of all required sets
-    if(splits["train"].empty() || splits["validation"].empty() || splits["test"].empty()) {
-        std::cerr << "error: split file missing one or more required sets\n";
+    if(splits["train"].size() != 70 || splits["validation"].size() != 23 || splits["test"].size() != 23) {
+        std::cerr << "error: incorrect sequence counts per split requirements\n";
         std::exit(EXIT_FAILURE);
     }
 
@@ -252,14 +253,6 @@ std::map<std::string, std::vector<std::string>> load_splits(const std::string& f
 
 int main(int argc, char** argv) {
     Args args = parse_args(argc, argv);
-    
-    // verifying output path is writable early
-    std::ofstream out(args.out_file);
-    if(!out.is_open()) {
-        std::cerr << "error: could not open output file " << args.out_file << " for writing\n";
-        std::exit(EXIT_FAILURE);
-    }
-    out.close();
     
     auto splits = load_splits(args.split_file);
     std::cout << "loaded " << splits["train"].size() << " training sequences\n";
