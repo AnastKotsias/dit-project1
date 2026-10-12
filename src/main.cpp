@@ -149,7 +149,7 @@ Args parse_args(int argc, char** argv) {
                                 parsed_options.count("-nprobe") || parsed_options.count("-M") || parsed_options.count("-nbits"))) {
         std::cerr << "error: invalid parameters for lsh search\n";
         std::exit(EXIT_FAILURE);
-    } else if(args.method == "hypercube" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
+    } else if(args.method == "hypercube" && (parsed_options.count("-k") || parsed_options.count("-L") ||
                                 parsed_options.count("-kclusters") ||
                                 parsed_options.count("-nprobe") || parsed_options.count("-nbits"))) {
         std::cerr << "error: invalid parameters for hypercube search\n";
@@ -168,6 +168,11 @@ Args parse_args(int argc, char** argv) {
     // validating numeric ranges and set types
     if(args.vocab <= 0 || args.s_max <= 0 || args.d_mir <= 0) {
         std::cerr << "error: -vocab, -S, and -D must be strictly positive\n";
+        std::exit(EXIT_FAILURE);
+    }
+    if(args.d_mir != 1000 && args.d_mir != 5000 &&
+       args.d_mir != 10000 && args.d_mir != 25000) {
+        std::cerr << "error: -D must be 1000, 5000, 10000, or 25000\n";
         std::exit(EXIT_FAILURE);
     }
     if(args.set_type != "validation" && args.set_type != "test") {
