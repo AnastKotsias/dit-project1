@@ -36,7 +36,7 @@ struct Args {
     int hyper_kproj = 10;
     int hyper_probes = 10;
     int ivf_kclusters = -1;  // to dynamically calculate sqrt(n) later
-    int ivf_nprobe = 5;
+    int ivf_nprobe = -1;     // resolved after the database size is known
     int m_param = -1;   // to handle default 500 for hypercube or 16 for pq later
     int pq_nbits = 8;
 };
@@ -183,8 +183,8 @@ Args parse_args(int argc, char** argv) {
 
     // validating method specific parameter constraints
     if(args.lsh_k <= 0 || args.lsh_l <= 0 || args.w <= 0.0 || args.hyper_kproj <= 0 ||
-        args.hyper_probes <= 0 || args.ivf_nprobe <= 0 || args.pq_nbits <= 0) {
-        std::cerr << "error: method parameters (k, L, w, kproj, probes, nprobe, nbits) must be strictly positive\n";
+        args.hyper_probes <= 0 || args.pq_nbits <= 0) {
+        std::cerr << "error: method parameters (k, L, w, kproj, probes, nbits) must be strictly positive\n";
         std::exit(EXIT_FAILURE);
     }
     if(!std::isfinite(args.w) || args.w <= 0.0) {
@@ -195,6 +195,10 @@ Args parse_args(int argc, char** argv) {
     // checking optional parameters that have dynamic default calculation flags
     if(args.ivf_kclusters != -1 && args.ivf_kclusters <= 0) {
         std::cerr << "error: -kclusters must be strictly positive\n";
+        std::exit(EXIT_FAILURE);
+    }
+    if(args.ivf_nprobe != -1 && args.ivf_nprobe <= 0) {
+        std::cerr << "error: -nprobe must be strictly positive\n";
         std::exit(EXIT_FAILURE);
     }
     if(args.m_param != -1 && args.m_param <= 0) {
@@ -369,6 +373,25 @@ int main(int argc, char** argv) {
         std::cerr << "error: ran out of MIRFlickr images before reaching -D="
                   << args.d_mir << "\n";
         return EXIT_FAILURE;
+    }
+
+    const int n_database = static_cast<int>(database_bows.size());
+    if(n_database <= 0) {
+        std::cerr << "error: database contains no usable image vectors\n";
+        return EXIT_FAILURE;
+    }
+
+    if(args.method == "ivfflat" || args.method == "ivfpq") {
+        if(args.ivf_kclusters == -1) {
+            args.ivf_kclusters = static_cast<int>(
+                std::ceil(std::sqrt(static_cast<double>(n_database))));
+        }
+        if(args.ivf_nprobe == -1) {
+            args.ivf_nprobe = 5;
+        }
+        std::cout << "resolved IVF parameters: kclusters="
+                  << args.ivf_kclusters
+                  << ", nprobe=" << args.ivf_nprobe << "\n";
     }
 
     std::vector<std::vector<double>> query_bows;
