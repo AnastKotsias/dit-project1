@@ -1,23 +1,34 @@
 #ifndef DATASET_HPP
 #define DATASET_HPP
 
-#include <vector>
 #include <string>
 #include <filesystem>
+#include <vector>
 
 namespace image_search {
+
+struct ImageRecord {
+    std::string filepath;
+    std::string identifier;
+};
+
+struct EvaluationDataset {
+    std::vector<ImageRecord> queries;
+    std::vector<ImageRecord> database;
+};
 
 // retrieves paths for all training images in the given sequences
 std::vector<std::filesystem::path> get_training_image_paths(
     const std::string& hp_path,
     const std::vector<std::string>& train_sequences);
 
-// retrieves paths for query images and their corresponding database images
-void get_evaluation_paths(
-    const std::string& hp_path,
-    const std::vector<std::string>& eval_sequences,
-    std::vector<std::filesystem::path>& queries,
-    std::vector<std::filesystem::path>& database);
+// Builds query and database records for one evaluation split.
+EvaluationDataset get_evaluation_paths(
+    const std::string& hp_dir,
+    const std::string& mir_dir,
+    const std::string& split_file,
+    const std::string& set_type,
+    int distractor_count);
     
 } // namespace image_search
 
