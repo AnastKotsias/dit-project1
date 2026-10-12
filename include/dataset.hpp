@@ -14,7 +14,8 @@ struct ImageRecord {
 
 struct EvaluationDataset {
     std::vector<ImageRecord> queries;
-    std::vector<ImageRecord> database;
+    std::vector<ImageRecord> database;        // HPatches images I_2 ... I_6
+    std::vector<ImageRecord> distractor_pool; // Ordered MIRFlickr image pool
 };
 
 // retrieves paths for all training images in the given sequences
@@ -27,8 +28,7 @@ EvaluationDataset get_evaluation_paths(
     const std::string& hp_dir,
     const std::string& mir_dir,
     const std::string& split_file,
-    const std::string& set_type,
-    int distractor_count);
+    const std::string& set_type);
     
 } // namespace image_search
 

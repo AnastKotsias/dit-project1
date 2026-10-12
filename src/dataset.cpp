@@ -99,12 +99,7 @@ EvaluationDataset get_evaluation_paths(
     const std::string& hp_dir,
     const std::string& mir_dir,
     const std::string& split_file,
-    const std::string& set_type,
-    int distractor_count) {
-    if(distractor_count <= 0) {
-        throw std::invalid_argument("distractor_count must be strictly positive");
-    }
-
+    const std::string& set_type) {
     EvaluationDataset dataset;
     const auto sequences = read_sequences(split_file, set_type);
     const std::filesystem::path hp_base(hp_dir);
@@ -124,13 +119,10 @@ EvaluationDataset get_evaluation_paths(
     }
 
     const auto mirflickr_images = list_mirflickr_images(mir_dir);
-    if(static_cast<int>(mirflickr_images.size()) < distractor_count) {
-        throw std::runtime_error("MIRFlickr contains fewer images than requested");
-    }
-    for(int i = 0 ; i < distractor_count ; ++i) {
-        dataset.database.push_back({
-            mirflickr_images[i].string(),
-            mirflickr_images[i].filename().string()
+    for(const auto& path : mirflickr_images) {
+        dataset.distractor_pool.push_back({
+            path.string(),
+            path.filename().string()
         });
     }
 
