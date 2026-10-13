@@ -11,7 +11,7 @@
 #include <filesystem>
 
 #include "dataset.hpp"
-#include "image_features.hpp"
+#include "pipeline.hpp"
 #include "vocabulary.hpp"
 
 // holds parsed arguments
@@ -238,27 +238,15 @@ int main(int argc, char** argv) {
 
     // setting up random number generator for sampling
     std::mt19937 rng(args.seed);
-    std::vector<cv::Mat> sampled_train_descriptors;
-
     std::cout << "extracting and sampling sift descriptors for vocabulary...\n";
-    int successful_train_images = 0;
-    int failed_train_images = 0;
-    for(const auto& path : train_paths) {
-        auto result = image_search::extract_sift_descriptors(path);
-
-        if(result.status == image_search::SiftExtractionStatus::Success &&
-           !result.descriptors.empty()) {
-            auto sampled = image_search::sample_training_descriptors(result.descriptors, args.s_max, rng);
-            sampled_train_descriptors.push_back(sampled);
-            ++successful_train_images;
-        } else {
-            ++failed_train_images;
-            std::cerr << "warning: failed to extract descriptors from training image: "
-                      << path << "\n";
-        }
+    const auto training_result = image_search::extract_training_descriptors(
+        train_paths, args.s_max, rng);
+    for(const auto& path : training_result.failed_paths) {
+        std::cerr << "warning: failed to extract descriptors from training image: "
+                  << path << "\n";
     }
 
-    if(successful_train_images == 0) {
+    if(training_result.successful_images == 0) {
         std::cerr << "error: all training images failed descriptor extraction\n";
         return EXIT_FAILURE;
     }
@@ -267,7 +255,7 @@ int main(int argc, char** argv) {
     cv::Mat vocabulary;
     try {
         vocabulary = image_search::compute_visual_vocabulary(
-            sampled_train_descriptors, args.vocab, args.seed);
+            training_result.sampled_descriptors, args.vocab, args.seed);
     } catch(const std::exception& error) {
         std::cerr << "error: failed to compute vocabulary: "
                   << error.what() << "\n";
@@ -279,8 +267,8 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     std::cout << "vocabulary computed successfully using "
-              << successful_train_images << " images ("
-              << failed_train_images << " failed)\n";
+    << training_result.successful_images << " images ("
+    << training_result.failed_images << " failed)\n";
 
     image_search::EvaluationDataset evaluation_dataset;
     try {
@@ -292,48 +280,28 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    std::vector<std::vector<double>> database_bows;
-    std::vector<std::string> database_ids;
-
-    for(const auto& record : evaluation_dataset.database) {
-        const auto result = image_search::extract_sift_descriptors(
-            std::filesystem::path(record.filepath));
-        if(result.status != image_search::SiftExtractionStatus::Success ||
-           result.descriptors.empty()) {
-            std::cerr << "warning: skipping invalid HPatches database image: "
-                      << record.filepath << "\n";
-            continue;
-        }
-
-        database_bows.push_back(
-            image_search::compute_image_bow_histogram(result.descriptors, vocabulary));
-        database_ids.push_back(record.identifier);
+    const auto hpatches_database = image_search::extract_bow_vectors(
+        evaluation_dataset.database, vocabulary);
+    for(const auto& record : hpatches_database.failed_records) {
+        std::cerr << "warning: skipping invalid HPatches database image: "
+                  << record.filepath << "\n";
     }
 
-    int distractors_added = 0;
-    for(const auto& record : evaluation_dataset.distractor_pool) {
-        if(distractors_added >= args.d_mir) {
-            break;
-        }
-
-        const auto result = image_search::extract_sift_descriptors(
-            std::filesystem::path(record.filepath));
-        if(result.status != image_search::SiftExtractionStatus::Success ||
-           result.descriptors.empty()) {
-            continue;
-        }
-
-        database_bows.push_back(
-            image_search::compute_image_bow_histogram(result.descriptors, vocabulary));
-        database_ids.push_back(record.identifier);
-        ++distractors_added;
-    }
-
-    if(distractors_added < args.d_mir) {
+    const auto distractors = image_search::extract_bow_vectors(
+        evaluation_dataset.distractor_pool, vocabulary, args.d_mir);
+    const auto distractors_added = distractors.vectors.size();
+    if(distractors_added < static_cast<std::size_t>(args.d_mir)) {
         std::cerr << "error: ran out of MIRFlickr images before reaching -D="
                   << args.d_mir << "\n";
         return EXIT_FAILURE;
     }
+
+    std::vector<std::vector<double>> database_bows = hpatches_database.vectors;
+    std::vector<std::string> database_ids = hpatches_database.identifiers;
+    database_bows.insert(database_bows.end(), distractors.vectors.begin(),
+                          distractors.vectors.end());
+    database_ids.insert(database_ids.end(), distractors.identifiers.begin(),
+                        distractors.identifiers.end());
 
     const int n_database = static_cast<int>(database_bows.size());
     if(n_database <= 0) {
@@ -354,25 +322,16 @@ int main(int argc, char** argv) {
                   << ", nprobe=" << args.ivf_nprobe << "\n";
     }
 
-    std::vector<std::vector<double>> query_bows;
-    std::vector<std::string> query_ids;
-    for(const auto& record : evaluation_dataset.queries) {
-        const auto result = image_search::extract_sift_descriptors(
-            std::filesystem::path(record.filepath));
-        if(result.status != image_search::SiftExtractionStatus::Success ||
-           result.descriptors.empty()) {
-            std::cerr << "error: query image failed to produce descriptors: "
-                      << record.filepath << "\n";
-            return EXIT_FAILURE;
-        }
-
-        query_bows.push_back(
-            image_search::compute_image_bow_histogram(result.descriptors, vocabulary));
-        query_ids.push_back(record.identifier);
+    const auto queries = image_search::extract_bow_vectors(
+        evaluation_dataset.queries, vocabulary);
+    if(!queries.failed_records.empty()) {
+        std::cerr << "error: query image failed to produce descriptors: "
+                  << queries.failed_records.front().filepath << "\n";
+        return EXIT_FAILURE;
     }
 
     std::cout << "prepared " << database_bows.size()
-              << " database vectors and " << query_bows.size()
+              << " database vectors and " << queries.vectors.size()
               << " query vectors\n";
 
     return EXIT_SUCCESS;

@@ -22,11 +22,13 @@ without changing the data-preparation pipeline.
 ├── include/
 │   ├── dataset.hpp
 │   ├── image_features.hpp
+│   ├── pipeline.hpp
 │   └── vocabulary.hpp
 ├── src/
 │   ├── dataset.cpp
 │   ├── image_features.cpp
 │   ├── main.cpp
+│   ├── pipeline.cpp
 │   └── vocabulary.cpp
 └── .vscode/
     ├── c_cpp_properties.json
@@ -52,20 +54,22 @@ src/main.cpp
     │                                  ├── training image paths
     │                                  └── evaluation records
     │
-    ├── image_features module ◄──── image paths
+    ├── pipeline module ◄──────── image paths and dataset records
     │       │
-    │       └── SIFT descriptor matrices (cv::Mat)
+    │       ├── image_features module
+    │       │       └── SIFT descriptor matrices (cv::Mat)
+    │       │
+    │       └── vocabulary module
+    │               └── normalized BoVW histograms (K doubles)
     │
-    └── vocabulary module ◄────── descriptor matrices
-            │
-            ├── visual vocabulary (K × 128 cv::Mat)
-            └── normalized BoVW histograms (K doubles)
+    └── vocabulary module ◄────── sampled training descriptors
+            └── visual vocabulary (K × 128 cv::Mat)
 ```
 
 The headers define the public interfaces between modules. The `.cpp` files hide
-the implementation details. `main.cpp` is the orchestration layer: it does not
-implement SIFT or k-means itself; it calls the corresponding module functions
-and handles application-level errors.
+the implementation details. `main.cpp` is the orchestration layer: it selects
+the application policy for failures, while `pipeline.cpp` provides reusable
+image-preparation operations that can be tested independently.
 
 ## `CMakeLists.txt`
 
@@ -304,10 +308,38 @@ collection. `main.cpp` already rejects failed extraction results before calling
 this function. The vocabulary must have positive dimensions and type `CV_32F`;
 descriptor matrices must also be `CV_32F` and have the same number of columns.
 
+## Pipeline module
+
+[`include/pipeline.hpp`](include/pipeline.hpp) and
+[`src/pipeline.cpp`](src/pipeline.cpp) contain reusable preparation helpers.
+They keep filesystem and image-processing mechanics out of `main.cpp`.
+
+### `extract_training_descriptors`
+
+This helper receives training image paths, extracts SIFT descriptors, samples
+up to `S_max` descriptors per successful image using the supplied random
+generator, and returns sampled matrices, success/failure counts, and failed
+paths. It does not print or terminate; the caller decides how to report
+failures and whether zero successful images is fatal.
+
+### `extract_bow_vectors`
+
+This helper receives `ImageRecord` values and a trained vocabulary. For each
+usable image it extracts SIFT descriptors and computes a normalized BoVW
+vector. It returns vectors and identifiers in matching order, plus records
+that failed extraction.
+
+An optional successful-record limit supports the MIRFlickr rule: scanning stops
+after the requested number of usable distractors has been collected. A limit
+of zero processes every record. The helper does not decide whether failed
+records are warnings or fatal errors.
+
 ## `src/main.cpp`
 
-[`src/main.cpp`](src/main.cpp) is the application entry point and currently
-coordinates all implemented stages.
+[`src/main.cpp`](src/main.cpp) is the application entry point and coordinates
+the implemented stages and failure policy. Descriptor extraction and BoVW
+generation are delegated to the pipeline module, while `main.cpp` combines
+returned vectors and handles application-level conditions.
 
 ### `Args`
 
@@ -375,16 +407,15 @@ The current `main` function performs these stages:
 2. Load and validate the split counts.
 3. Generate all six training-image paths for the training sequences.
 4. Create a seeded Mersenne Twister generator.
-5. Extract and sample SIFT descriptors from training images.
-6. Count successful and failed training images.
-7. Abort clearly if every training image fails.
-8. Train the visual vocabulary.
-9. Construct query, HPatches database, and MIRFlickr distractor records.
-10. Extract descriptors and generate BoVW vectors for valid HPatches database images.
-11. Scan the ordered MIRFlickr pool until `D` usable distractors have been added.
-12. Resolve IVF defaults after the final database size is known.
-13. Extract descriptors and generate BoVW vectors for all queries.
-14. Print the number of prepared database and query vectors.
+5. Delegate training extraction and descriptor sampling to the pipeline module.
+6. Count failures and abort clearly if every training image fails.
+7. Train the visual vocabulary.
+8. Construct query, HPatches database, and MIRFlickr distractor records.
+9. Delegate HPatches database vectorization to the pipeline module.
+10. Delegate MIRFlickr vectorization with a successful-image limit of `D`.
+11. Resolve IVF defaults after the final database size is known.
+12. Delegate query vectorization and reject any failed query.
+13. Print the number of prepared database and query vectors.
 
 Unreadable or descriptor-less training images generate warnings and are
 excluded. Invalid HPatches database images are also skipped. Query failures are

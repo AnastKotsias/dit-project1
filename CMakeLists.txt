@@ -12,6 +12,7 @@ add_executable(search
     src/image_features.cpp
     src/vocabulary.cpp
     src/dataset.cpp
+    src/pipeline.cpp
 )
 
 target_include_directories(search PRIVATE include)
