@@ -92,6 +92,11 @@ std::vector<double> compute_image_bow_histogram(
     const cv::Mat& descriptors,
     const cv::Mat& vocabulary) {
 
+    if(descriptors.empty() || descriptors.rows == 0) {
+        throw std::invalid_argument(
+            "cannot compute BoW histogram for empty descriptors");
+    }
+
     // validate vocabulary state and dimensions
     if(vocabulary.empty() || vocabulary.rows == 0 || vocabulary.cols <= 0) {
         throw std::invalid_argument("vocabulary must not be empty");
@@ -99,13 +104,8 @@ std::vector<double> compute_image_bow_histogram(
     if(vocabulary.type() != CV_32F) {
         throw std::invalid_argument("vocabulary must be of type CV_32F");
     }
-
     int vocab_size = vocabulary.rows;
     std::vector<double> histogram(vocab_size, 0.0);
-
-    if(descriptors.empty()) {
-        return histogram;
-    }
 
     if(descriptors.type() != CV_32F) {
         throw std::invalid_argument("descriptors must be of type CV_32F");
@@ -128,10 +128,8 @@ std::vector<double> compute_image_bow_histogram(
     }
 
     // normalizing histogram by total descriptors count
-    if(n_descriptors > 0) {
-        for(double& val : histogram) {
-            val /= static_cast<double>(n_descriptors);
-        }
+    for(double& val : histogram) {
+        val /= static_cast<double>(n_descriptors);
     }
 
     return histogram;
