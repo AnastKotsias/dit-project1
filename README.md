@@ -171,7 +171,7 @@ and duplicate sequence names are reported with exceptions.
 
 [`src/dataset.cpp`](src/dataset.cpp) implements the dataset API.
 
-The private `read_sequences` helper validates each non-empty split-file line as
+The public `load_dataset_splits` function validates each non-empty split-file line as
 two fields:
 
 ```text
@@ -347,10 +347,10 @@ The current validation also enforces:
 
 IVF parameters use `-1` as an internal “not explicitly provided” value.
 
-### `load_splits`
+### `load_dataset_splits`
 
-`load_splits` performs the application-level split validation before training.
-It requires exactly:
+`load_dataset_splits` is the single split-file parser used by both the
+training setup and evaluation-dataset construction. It requires exactly:
 
 ```text
 70 train sequences
@@ -358,11 +358,14 @@ It requires exactly:
 23 test sequences
 ```
 
-The function returns a map from subset name to sequence names.
+The function returns a map from subset name to sequence names and throws
+descriptive exceptions for missing files, malformed lines, invalid subset
+names, duplicate sequences, or incorrect split counts.
 
-The dataset module independently reads the split file when creating evaluation
-records. This currently duplicates split-file parsing; the two paths validate
-the same file but serve different module boundaries.
+`main.cpp` converts those exceptions into application-level error messages.
+The evaluation API uses the same loader when selecting the requested
+validation or test sequences, so split-file format and validation rules are
+not duplicated across modules.
 
 ### Main execution sequence
 

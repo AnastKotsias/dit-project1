@@ -4,6 +4,7 @@
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -32,32 +33,30 @@ std::optional<int> extract_image_number(const std::filesystem::path& path) {
     return number;
 }
 
-std::vector<std::string> read_sequences(
-    const std::string& split_file,
-    const std::string& requested_set) {
-    if(requested_set != "validation" && requested_set != "test") {
-        throw std::invalid_argument("set_type must be validation or test");
-    }
+}  // namespace
 
+std::map<std::string, std::vector<std::string>> load_dataset_splits(
+    const std::string& split_file) {
+    std::map<std::string, std::vector<std::string>> splits;
     std::ifstream file(split_file);
     if(!file.is_open()) {
         throw std::runtime_error("could not open split file " + split_file);
     }
 
-    std::vector<std::string> sequences;
     std::set<std::string> seen_sequences;
-    std::string sequence;
-    std::string subset;
-    std::string extra;
+    std::string line;
 
-    while(std::getline(file, sequence)) {
-        if(sequence.empty()) {
+    while(std::getline(file, line)) {
+        if(line.empty()) {
             continue;
         }
 
-        std::istringstream line(sequence);
-        if(!(line >> sequence >> subset) || (line >> extra)) {
-            throw std::invalid_argument("malformed split file line");
+        std::istringstream fields(line);
+        std::string sequence;
+        std::string subset;
+        std::string extra;
+        if(!(fields >> sequence >> subset) || (fields >> extra)) {
+            throw std::invalid_argument("malformed split file line: " + line);
         }
         if(subset != "train" && subset != "validation" && subset != "test") {
             throw std::invalid_argument("invalid subset name in split file");
@@ -65,12 +64,17 @@ std::vector<std::string> read_sequences(
         if(!seen_sequences.insert(sequence).second) {
             throw std::invalid_argument("duplicate sequence in split file");
         }
-        if(subset == requested_set) {
-            sequences.push_back(sequence);
-        }
+        splits[subset].push_back(sequence);
     }
 
-    return sequences;
+    if(splits["train"].size() != 70 ||
+       splits["validation"].size() != 23 ||
+       splits["test"].size() != 23) {
+        throw std::invalid_argument(
+            "split file must contain 70 train, 23 validation, and 23 test sequences");
+    }
+
+    return splits;
 }
 
 std::vector<std::filesystem::path> list_mirflickr_images(
@@ -105,8 +109,6 @@ std::vector<std::filesystem::path> list_mirflickr_images(
     return images;
 }
 
-}  // namespace
-
 std::vector<std::filesystem::path> get_training_image_paths(
     const std::string& hp_path,
     const std::vector<std::string>& train_sequences) {
@@ -130,7 +132,11 @@ EvaluationDataset get_evaluation_paths(
     const std::string& split_file,
     const std::string& set_type) {
     EvaluationDataset dataset;
-    const auto sequences = read_sequences(split_file, set_type);
+    if(set_type != "validation" && set_type != "test") {
+        throw std::invalid_argument("set_type must be validation or test");
+    }
+    const auto splits = load_dataset_splits(split_file);
+    const auto& sequences = splits.at(set_type);
     const std::filesystem::path hp_base(hp_dir);
 
     for(const auto& sequence : sequences) {

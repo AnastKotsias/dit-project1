@@ -3,6 +3,7 @@
 
 #include <string>
 #include <filesystem>
+#include <map>
 #include <vector>
 
 namespace image_search {
@@ -17,6 +18,10 @@ struct EvaluationDataset {
     std::vector<ImageRecord> database;        // HPatches images I_2 ... I_6
     std::vector<ImageRecord> distractor_pool; // Ordered MIRFlickr image pool
 };
+
+// Reads and validates the complete train/validation/test split.
+std::map<std::string, std::vector<std::string>> load_dataset_splits(
+    const std::string& split_file);
 
 // retrieves paths for all training images in the given sequences
 std::vector<std::filesystem::path> get_training_image_paths(

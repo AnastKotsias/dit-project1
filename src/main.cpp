@@ -1,5 +1,4 @@
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
 #include <map>
@@ -8,7 +7,6 @@
 #include <cmath>
 #include <set>
 #include <optional>
-#include <sstream>
 #include <random>
 #include <filesystem>
 
@@ -221,55 +219,17 @@ Args parse_args(int argc, char** argv) {
     return args;
 }
 
-// loading train validation test splits
-std::map<std::string, std::vector<std::string>> load_splits(const std::string& filename) {
-    std::map<std::string, std::vector<std::string>> splits;
-    std::set<std::string> seen_seqs;
-    std::ifstream file(filename);
-
-    // checking explicitly if file exists and is open
-    if(!file.is_open()) {
-        std::cerr << "error: could not open split file " << filename <<"\n";
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::string line;
-    while(std::getline(file, line)) {
-        if(line.empty()) continue;
-
-        std::istringstream iss(line);
-        std::string sequence, subset, extra;
-
-        if(!(iss >> sequence >> subset) || (iss >> extra)) {
-            std::cerr << "error: malformed line in split file: " << line << "\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        if(subset != "train" && subset != "validation" && subset != "test") {
-            std::cerr << "error: invalid subset name " << subset << " in split file\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        if(!seen_seqs.insert(sequence).second) {
-            std::cerr << "error: duplicate sequence " << sequence << " in split file\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        splits[subset].push_back(sequence);
-    }
-
-    if(splits["train"].size() != 70 || splits["validation"].size() != 23 || splits["test"].size() != 23) {
-        std::cerr << "error: incorrect sequence counts per split requirements\n";
-        std::exit(EXIT_FAILURE);
-    }
-
-    return splits;
-}
-
 int main(int argc, char** argv) {
     Args args = parse_args(argc, argv);
     
-    auto splits = load_splits(args.split_file);
+    std::map<std::string, std::vector<std::string>> splits;
+    try {
+        splits = image_search::load_dataset_splits(args.split_file);
+    } catch(const std::exception& error) {
+        std::cerr << "error: failed to load split file: "
+                  << error.what() << "\n";
+        return EXIT_FAILURE;
+    }
     std::cout << "loaded " << splits["train"].size() << " training sequences\n";
     
     // resolving paths for training images
