@@ -102,7 +102,8 @@ struct ImageRecord {
 `filepath` is the path used to read the image. `identifier` is the stable name
 that will later be written to search results:
 
-- HPatches image: `v_bird/2`
+- HPatches query: `v_bird`
+- HPatches database image: `v_bird/2`
 - MIRFlickr image: `im123.jpg`
 
 Keeping these values together prevents the search layer from losing the logical
@@ -156,8 +157,11 @@ This function:
 3. Creates one query record per selected sequence.
 4. Creates five HPatches database records per selected sequence.
 5. Enumerates MIRFlickr image files.
-6. Sorts the MIRFlickr paths deterministically.
-7. Places every sorted MIRFlickr record in `distractor_pool`.
+6. Sorts canonical `im<number>.<extension>` files by their numeric image
+   number, so `im2.jpg` comes before `im10.jpg`.
+7. Uses a deterministic filename ordering for files that do not match the
+   canonical numeric naming pattern.
+8. Places every sorted MIRFlickr record in `distractor_pool`.
 
 It returns a complete value instead of mutating vectors supplied by the caller.
 Invalid set names, missing split files, malformed lines, invalid subset names,
@@ -179,10 +183,14 @@ only the requested subset. The public evaluation function accepts only
 `validation` and `test`, because training paths are obtained separately through
 `get_training_image_paths`.
 
-The private `list_mirflickr_images` helper scans the MIRFlickr directory,
-retains regular `.jpg`, `.jpeg`, `.JPG`, and `.JPEG` files, and sorts the paths.
-It does not inspect image contents; SIFT-based usability filtering is performed
-later by `main.cpp`.
+The private `list_mirflickr_images` helper scans the MIRFlickr directory and
+retains regular `.jpg`, `.jpeg`, `.JPG`, and `.JPEG` files. Canonical filenames
+such as `im1.jpg`, `im2.jpg`, and `im10.jpg` are ordered numerically rather than
+lexicographically. This is important because the assignment defines the
+distractor set as the first `D` images in ascending numerical order. Files
+without a valid `im<number>` stem use deterministic filename ordering. The
+helper does not inspect image contents; SIFT-based usability filtering is
+performed later by `main.cpp`.
 
 ## Image-feature module
 
@@ -262,13 +270,15 @@ The function:
 
 1. Validates that input matrices exist and `K` is positive.
 2. Finds a non-empty matrix to determine the descriptor dimension.
-3. Requires all non-empty matrices to have equal dimensions and type `CV_32F`.
-4. Counts all sampled descriptor rows.
-5. Rejects input with fewer than `K` descriptors.
-6. Concatenates all training descriptors into one OpenCV matrix.
-7. Sets OpenCV's random state from the supplied seed.
-8. Runs OpenCV k-means with k-means++ initialization.
-9. Returns the `K × 128` center matrix.
+3. Requires the reference and all non-empty matrices to be non-empty,
+   single-channel `CV_32F` matrices.
+4. Requires all non-empty matrices to have equal dimensions.
+5. Counts all sampled descriptor rows and rejects integer overflow.
+6. Rejects input with fewer than `K` descriptors.
+7. Concatenates all training descriptors into one OpenCV matrix.
+8. Sets OpenCV's random state from the supplied seed.
+9. Runs OpenCV k-means with k-means++ initialization.
+10. Returns the `K × 128` center matrix.
 
 The resulting centers are the visual words shared by every image in the
 evaluation set.
@@ -277,17 +287,22 @@ evaluation set.
 
 For one image, the function:
 
-1. Validates the vocabulary and descriptor dimensions.
-2. Creates a zero histogram with `K` bins.
-3. Uses a brute-force OpenCV L2 matcher to assign every descriptor to its
+1. Rejects an empty descriptor matrix with `std::invalid_argument`.
+2. Validates the vocabulary and descriptor dimensions.
+3. Creates a zero histogram with `K` bins.
+4. Uses a brute-force OpenCV L2 matcher to assign every descriptor to its
    nearest vocabulary center.
-4. Increments the selected visual-word bin.
-5. Divides every bin by the number of descriptors.
-6. Returns a normalized `std::vector<double>`.
+5. Validates each returned nearest-word index.
+6. Increments the selected visual-word bin.
+7. Divides every bin by the number of descriptors.
+8. Returns a normalized `std::vector<double>`.
 
-For a non-empty image, the histogram values sum to one. An empty descriptor
-matrix produces an all-zero histogram, but `main.cpp` rejects empty extraction
-results before calling this function for database or query images.
+For a non-empty image, the histogram values sum to one. Empty descriptors no
+longer produce an all-zero histogram: the function throws explicitly so callers
+cannot accidentally insert an invalid zero vector into a database or query
+collection. `main.cpp` already rejects failed extraction results before calling
+this function. The vocabulary must have positive dimensions and type `CV_32F`;
+descriptor matrices must also be `CV_32F` and have the same number of columns.
 
 ## `src/main.cpp`
 
