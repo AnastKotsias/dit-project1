@@ -1,8 +1,10 @@
 #include "dataset.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -10,6 +12,25 @@
 namespace image_search {
 
 namespace {
+
+std::optional<int> extract_image_number(const std::filesystem::path& path) {
+    const std::string stem = path.stem().string();
+    constexpr char prefix[] = "im";
+    constexpr std::size_t prefix_length = sizeof(prefix) - 1;
+    if(stem.size() <= prefix_length ||
+       stem.compare(0, prefix_length, prefix) != 0) {
+        return std::nullopt;
+    }
+
+    const auto digits = stem.substr(prefix_length);
+    int number = 0;
+    const auto result = std::from_chars(
+        digits.data(), digits.data() + digits.size(), number);
+    if(result.ec != std::errc{} || result.ptr != digits.data() + digits.size()) {
+        return std::nullopt;
+    }
+    return number;
+}
 
 std::vector<std::string> read_sequences(
     const std::string& split_file,
@@ -72,7 +93,15 @@ std::vector<std::filesystem::path> list_mirflickr_images(
         }
     }
 
-    std::sort(images.begin(), images.end());
+    std::sort(images.begin(), images.end(),
+        [](const fs::path& left, const fs::path& right) {
+            const auto left_number = extract_image_number(left);
+            const auto right_number = extract_image_number(right);
+            if(left_number && right_number && *left_number != *right_number) {
+                return *left_number < *right_number;
+            }
+            return left.filename().string() < right.filename().string();
+        });
     return images;
 }
 
@@ -107,7 +136,7 @@ EvaluationDataset get_evaluation_paths(
     for(const auto& sequence : sequences) {
         dataset.queries.push_back({
             (hp_base / sequence / "1.ppm").string(),
-            sequence + "/1"
+            sequence
         });
         for(int image_number = 2 ; image_number <= 6 ; ++image_number) {
             dataset.database.push_back({

@@ -1,6 +1,7 @@
 #include "vocabulary.hpp"
 #include <opencv2/ml.hpp>
 #include <opencv2/features2d.hpp>
+#include <limits>
 #include <stdexcept>
 #include <cmath>
 
@@ -30,6 +31,10 @@ cv::Mat compute_visual_vocabulary(
     if(!reference) {
         throw std::invalid_argument("training descriptors cannot be all empty");
     }
+    if(reference->type() != CV_32F || reference->cols <= 0) {
+        throw std::invalid_argument(
+            "training descriptors must be non-empty single-channel CV_32F matrices");
+    }
 
     const int cols = reference->cols;
 
@@ -42,6 +47,9 @@ cv::Mat compute_visual_vocabulary(
         }
         if(mat.type() != CV_32F) {
             throw std::invalid_argument("all training descriptors must be of type CV_32F");
+        }
+        if(total_rows > std::numeric_limits<int>::max() - mat.rows) {
+            throw std::invalid_argument("total training descriptor count is too large");
         }
         total_rows += mat.rows;
     }
@@ -85,7 +93,7 @@ std::vector<double> compute_image_bow_histogram(
     const cv::Mat& vocabulary) {
 
     // validate vocabulary state and dimensions
-    if(vocabulary.empty() || vocabulary.rows == 0) {
+    if(vocabulary.empty() || vocabulary.rows == 0 || vocabulary.cols <= 0) {
         throw std::invalid_argument("vocabulary must not be empty");
     }
     if(vocabulary.type() != CV_32F) {
@@ -113,6 +121,9 @@ std::vector<double> compute_image_bow_histogram(
 
     int n_descriptors = descriptors.rows;
     for(const auto& match : matches) {
+        if(match.trainIdx < 0 || match.trainIdx >= vocab_size) {
+            throw std::runtime_error("nearest-word assignment returned an invalid index");
+        }
         histogram[match.trainIdx] += 1.0;
     }
 
