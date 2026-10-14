@@ -352,7 +352,7 @@ int main(int argc, char** argv) {
         }
 
         // Writing the results and metrics to the output file
-        image_search::evaluateAndWriteResults(args.output_path, "EXACT", all_results);
+        image_search::evaluateAndWriteResults(args.out_file, "EXACT", all_results);
     }
 
     return EXIT_SUCCESS;

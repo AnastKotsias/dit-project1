@@ -1,9 +1,8 @@
-#ifndef DATASET_HPP
-#define DATASET_HPP
+#ifndef SEARCH_HPP
+#define SEARCH_HPP
 
 #include <vector>
 #include <string>
-#include "dataset.hpp"
 
 namespace image_search {
 
