@@ -13,6 +13,7 @@
 #include "dataset.hpp"
 #include "pipeline.hpp"
 #include "vocabulary.hpp"
+#include "search.hpp"
 
 // holds parsed arguments
 struct Args {
@@ -333,6 +334,26 @@ int main(int argc, char** argv) {
     std::cout << "prepared " << database_bows.size()
               << " database vectors and " << queries.vectors.size()
               << " query vectors\n";
+
+    // Exact search implementation
+    if (args.method == "exact") {
+        image_search::ExactSearch exactSearch(database_bows, database_ids);
+        std::vector<image_search::SearchResult> all_results;
+        all_results.reserve(queries.vectors.size());
+
+        for (size_t i = 0; i < queries.vectors.size(); ++i) {
+            // Extracting query ID and sequence ID for the current query
+            std::string q_id = queries.identifiers[i];
+            std::string seq_id = evaluation_dataset.queries[i].identifier;
+            
+            // Performing the exact search for the current query and storing the result
+            image_search::SearchResult res = exactSearch.search(queries.vectors[i], q_id, seq_id);
+            all_results.push_back(res);
+        }
+
+        // Writing the results and metrics to the output file
+        image_search::evaluateAndWriteResults(args.output_path, "EXACT", all_results);
+    }
 
     return EXIT_SUCCESS;
 }

@@ -13,6 +13,7 @@ add_executable(search
     src/vocabulary.cpp
     src/dataset.cpp
     src/pipeline.cpp
+    src/search.cpp
 )
 
 target_include_directories(search PRIVATE include)
