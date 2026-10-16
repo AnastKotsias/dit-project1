@@ -334,6 +334,17 @@ after the requested number of usable distractors has been collected. A limit
 of zero processes every record. The helper does not decide whether failed
 records are warnings or fatal errors.
 
+## Search Implementation and Evaluation Module
+
+This module includes the implementation of **Exact Search** (`ExactSearch` class) and evaluation metrics:
+
+- **Exact Search**: Computes the Euclidean distance between each query BoW vector and all database BoW vectors (`database_bows`), sorts them in ascending order of distance, and selects the top-10 results.
+- **Evaluation & Metrics**: Automatically evaluates each query against the ground-truth relevant HPatches images ($I_2$ through $I_6$ of the sequence) to compute:
+  - `Recall@5` and `Recall@10`
+  - `AP@10` (Average Precision)
+  - Query execution time in milliseconds
+- **Output Generation**: Computes overall averages across all queries (`Mean Recall@5`, `Mean Recall@10`, `mAP@10`, and `Average query time`) and writes the final evaluation report to the path specified by `-o` adhering strictly to the required output format.
+
 ## `src/main.cpp`
 
 [`src/main.cpp`](src/main.cpp) is the application entry point and coordinates
@@ -516,16 +527,10 @@ Implemented:
 
 Not yet implemented:
 
-- Exact nearest-neighbor ranking
 - LSH index and querying
 - Hypercube index and querying
 - IVFFlat index and querying
 - IVFPQ index and querying
-- Top-10 result generation
-- Recall@5 and Recall@10
-- AP@10 and mAP@10
-- Query-time measurement
-- Writing the required output format
 - Validation-driven parameter selection
 
 Therefore, `-o` is parsed and stored, but the current program does not yet write
