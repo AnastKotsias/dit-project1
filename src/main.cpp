@@ -335,24 +335,60 @@ int main(int argc, char** argv) {
               << " database vectors and " << queries.vectors.size()
               << " query vectors\n";
 
-    // Exact search implementation
-    if (args.method == "exact") {
-        image_search::ExactSearch exactSearch(database_bows, database_ids);
+    try {
         std::vector<image_search::SearchResult> all_results;
         all_results.reserve(queries.vectors.size());
+        std::string output_name;
 
-        for (size_t i = 0; i < queries.vectors.size(); ++i) {
-            // Extracting query ID and sequence ID for the current query
-            std::string q_id = queries.identifiers[i];
-            std::string seq_id = evaluation_dataset.queries[i].identifier;
-            
-            // Performing the exact search for the current query and storing the result
-            image_search::SearchResult res = exactSearch.search(queries.vectors[i], q_id, seq_id);
-            all_results.push_back(res);
+        if(args.method == "exact") {
+            image_search::ExactSearch index(database_bows, database_ids);
+            for(std::size_t i = 0; i < queries.vectors.size(); ++i)
+                all_results.push_back(index.search(
+                    queries.vectors[i], queries.identifiers[i],
+                    evaluation_dataset.queries[i].identifier));
+            output_name = "EXACT";
+        } else if(args.method == "lsh") {
+            image_search::LSHSearch index(database_bows, database_ids, args.lsh_k,
+                                          args.lsh_l, args.w, args.seed);
+            for(std::size_t i = 0; i < queries.vectors.size(); ++i)
+                all_results.push_back(index.search(
+                    queries.vectors[i], queries.identifiers[i],
+                    evaluation_dataset.queries[i].identifier));
+            output_name = "LSH";
+        } else if(args.method == "hypercube") {
+            image_search::HypercubeSearch index(
+                database_bows, database_ids, args.hyper_kproj, args.w,
+                args.m_param, args.hyper_probes, args.seed);
+            for(std::size_t i = 0; i < queries.vectors.size(); ++i)
+                all_results.push_back(index.search(
+                    queries.vectors[i], queries.identifiers[i],
+                    evaluation_dataset.queries[i].identifier));
+            output_name = "HYPERCUBE";
+        } else if(args.method == "ivfflat") {
+            image_search::IVFFlatSearch index(
+                database_bows, database_ids, args.ivf_kclusters,
+                args.ivf_nprobe, args.seed);
+            for(std::size_t i = 0; i < queries.vectors.size(); ++i)
+                all_results.push_back(index.search(
+                    queries.vectors[i], queries.identifiers[i],
+                    evaluation_dataset.queries[i].identifier));
+            output_name = "IVFFLAT";
+        } else if(args.method == "ivfpq") {
+            image_search::IVFPQSearch index(
+                database_bows, database_ids, args.ivf_kclusters,
+                args.ivf_nprobe, args.m_param, args.pq_nbits, args.seed);
+            for(std::size_t i = 0; i < queries.vectors.size(); ++i)
+                all_results.push_back(index.search(
+                    queries.vectors[i], queries.identifiers[i],
+                    evaluation_dataset.queries[i].identifier));
+            output_name = "IVFPQ";
         }
 
-        // Writing the results and metrics to the output file
-        image_search::evaluateAndWriteResults(args.out_file, "EXACT", all_results);
+        image_search::evaluateAndWriteResults(args.out_file, output_name, all_results);
+        std::cout << "wrote search results to " << args.out_file << "\n";
+    } catch(const std::exception& error) {
+        std::cerr << "error: search index failed: " << error.what() << "\n";
+        return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;

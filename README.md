@@ -5,12 +5,10 @@ assignment. It prepares an image-retrieval dataset using SIFT local descriptors,
 learns a visual vocabulary with k-means, and converts images into fixed-size
 Bag-of-Visual-Words (BoVW) vectors.
 
-The code currently reaches the point where the training vocabulary, database
-vectors, and query vectors have been prepared. The nearest-neighbor indexes,
-ranking, evaluation metrics, and result-file generation are not yet implemented.
-The command-line parser already accepts the assignment's five method names and
-their parameters so that the later search implementations can be connected
-without changing the data-preparation pipeline.
+The code prepares the training vocabulary, database vectors, and query vectors,
+then searches them with exact search or one of four approximate indexes:
+LSH, Hypercube, IVFFlat, and IVFPQ. Every method reranks its candidate set by
+Euclidean distance, computes the retrieval metrics, and writes the result file.
 
 ## Project structure
 
@@ -23,13 +21,15 @@ without changing the data-preparation pipeline.
 │   ├── dataset.hpp
 │   ├── image_features.hpp
 │   ├── pipeline.hpp
-│   └── vocabulary.hpp
+│   |── vocabulary.hpp
+|   └── search.hpp 
 ├── src/
 │   ├── dataset.cpp
 │   ├── image_features.cpp
 │   ├── main.cpp
 │   ├── pipeline.cpp
-│   └── vocabulary.cpp
+│   ├── vocabulary.cpp
+|   └── search.cpp
 └── .vscode/
     ├── c_cpp_properties.json
     └── settings.json
@@ -79,7 +79,7 @@ image-preparation operations that can be tested independently.
 2. Declares a C++ project and requires C++20.
 3. Enables `compile_commands.json` generation.
 4. Locates OpenCV with `find_package(OpenCV REQUIRED)`.
-5. Builds the `search` executable from all four source files.
+5. Builds the `search` executable from all project source files.
 6. Adds `include/` to the header search path.
 7. Links the executable with the OpenCV libraries.
 
@@ -442,7 +442,9 @@ query_bows    : vector<vector<double>>
 query_ids     : vector<string>
 ```
 
-The search methods have not yet consumed these vectors.
+The selected search method consumes these vectors after preparation. Approximate
+methods use their index-specific candidate set and exact Euclidean reranking;
+the exact method evaluates every database vector.
 
 ### Deferred IVF defaults
 
@@ -509,8 +511,8 @@ Allowed values for `-D` are `1000`, `5000`, `10000`, and `25000`.
 | `-ivfflat` | `-kclusters`, `-nprobe` |
 | `-ivfpq` | `-kclusters`, `-nprobe`, `-M`, `-nbits` |
 
-The parser stores these values and validates their compatibility. The index
-implementations that should use them are still future work.
+The parser stores these values, validates their compatibility, and passes them
+to the selected index.
 
 ## Current implementation boundary
 
@@ -523,18 +525,20 @@ Implemented:
 - Normalized BoVW histogram construction
 - Robust handling of unreadable and descriptor-less images
 - Dynamic usable-MIRFlickr selection
-- Deferred IVF default calculation
+- Dynamic IVF default calculation
 
-Not yet implemented:
+Implemented search methods:
 
-- LSH index and querying
-- Hypercube index and querying
-- IVFFlat index and querying
-- IVFPQ index and querying
-- Validation-driven parameter selection
+- Exact exhaustive Euclidean search
+- LSH with Gaussian p-stable projections and multiple hash tables
+- Hypercube search with projection vertices, Hamming-distance probes, and a
+  maximum candidate limit
+- IVFFlat with k-means coarse centroids and `nprobe` lists
+- IVFPQ with IVF coarse lists and product-quantized sub-vectors
 
-Therefore, `-o` is parsed and stored, but the current program does not yet write
-the assignment's final result file.
+All methods write the assignment's result file through `-o`. Approximate
+indexes fall back to exhaustive ranking only when their candidate set is empty,
+so a query always produces a valid result.
 
 ## Development configuration
 

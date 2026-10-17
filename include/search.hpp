@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <string>
+#include <cstddef>
+#include <memory>
 
 namespace image_search {
 
@@ -27,6 +29,56 @@ public:
 
     // Search function
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id);
+};
+
+class LSHSearch {
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl;
+    
+public:
+    // Initialization of the LSHSearch class with database BoW vectors, their identifiers, and LSH parameters
+    LSHSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int k, int tables, double width, int seed = 1);
+    
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+};
+
+class HypercubeSearch {
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl;
+    
+public:
+    // Initialization of the HypercubeSearch class with database BoW vectors, their identifiers, and hypercube parameters
+    HypercubeSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int projections, double width, int max_candidates, int probes, int seed = 1);
+    
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+};
+
+class IVFFlatSearch {
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl;
+
+public:
+    // Initialization of the IVFFlatSearch class with database BoW vectors, their identifiers, and IVF parameters
+    IVFFlatSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int seed = 1);
+    
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+};
+
+class IVFPQSearch {
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl;
+
+public:
+    // Initialization of the IVFPQSearch class with database BoW vectors, their identifiers, and IVFPQ parameters
+    IVFPQSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int subquantizers, int bits, int seed = 1);
+    
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
 // Evaluates the search results and writes them to a specified output file
