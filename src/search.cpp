@@ -437,13 +437,18 @@ struct IVFPQSearch::Impl : DatabaseIndex {
             database.front().size() / subquantizers;
         const std::size_t sampleLimit =
             std::min<std::size_t>(database.size(), 2048);
+        std::vector<std::size_t> sampleIndices(database.size());
+        std::iota(sampleIndices.begin(), sampleIndices.end(), 0);
+        std::mt19937 rng(seed);
+        std::shuffle(sampleIndices.begin(), sampleIndices.end(), rng);
 
         // Train PQ codebooks on subvectors of coarse-centroid residuals.
         for(std::size_t i = 0; i < sampleLimit; ++i) {
-            Vector residual(database[i].size());
-            const auto& center = centers[coarse_assignments[i]];
-            for(std::size_t d = 0; d < database[i].size(); ++d)
-                residual[d] = database[i][d] - center[d];
+            const std::size_t databaseIndex = sampleIndices[i];
+            Vector residual(database[databaseIndex].size());
+            const auto& center = centers[coarse_assignments[databaseIndex]];
+            for(std::size_t d = 0; d < database[databaseIndex].size(); ++d)
+                residual[d] = database[databaseIndex][d] - center[d];
 
             for(int m = 0; m < subquantizers; ++m) {
                 training[m].emplace_back(
