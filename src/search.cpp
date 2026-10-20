@@ -137,6 +137,13 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
     for(int i = 0; i < limit; ++i) {
         top.push_back(ids[ranked[i].second]);
     }
+
+    // Stop timing once the ranked top-10 result identifiers are available.
+    // Ground-truth construction and metric calculation are intentionally
+    // outside the measured query interval.
+    const auto end = std::chrono::high_resolution_clock::now();
+    const double elapsed = std::chrono::duration<double, std::milli>(
+        end - start).count();
     
     // Build the set of relevant images for the given sequence
     std::set<std::string> relevant;
@@ -159,8 +166,6 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
     }
 
     // Return the search results
-    const auto end = std::chrono::high_resolution_clock::now();
-    const double elapsed = std::chrono::duration<double, std::milli>(end - start).count();
     return {queryId, top, matches5 / 5.0, matches10 / 5.0, apSum / 5.0, elapsed};
 }
 
