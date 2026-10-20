@@ -191,11 +191,21 @@ double computeEuclideanDistance(const std::vector<double>& a, const std::vector<
 }
 
 // ExactSearch class implementation
+struct ExactSearch::Impl : DatabaseIndex {
+    Impl(const std::vector<Vector>& db, const std::vector<std::string>& names)
+        : DatabaseIndex{db, names} {}
+};
+
+ExactSearch::ExactSearch(const std::vector<Vector>& db,
+                         const std::vector<std::string>& ids)
+    : impl(std::make_shared<Impl>(db, ids)) {}
+
 SearchResult ExactSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) {
     const auto start = std::chrono::high_resolution_clock::now();
-    std::vector<std::size_t> all(database_bows.size());
+    std::vector<std::size_t> all(impl->database.size());
     std::iota(all.begin(), all.end(), 0);
-    return buildResult(database_bows, database_ids, all, query, queryId, sequenceId, start);
+    return buildResult(
+        impl->database, impl->ids, all, query, queryId, sequenceId, start);
 }
 
 // LSHSearch class implementation

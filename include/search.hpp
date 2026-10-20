@@ -19,13 +19,13 @@ struct SearchResult {
 
 class ExactSearch {
 private:
-    std::vector<std::vector<double>> database_bows;
-    std::vector<std::string> database_ids;
+    struct Impl;
+    std::shared_ptr<Impl> impl;
 
 public:
     // Ιnitialization of the ExactSearch class with database BoW vectors and their identifiers
-    ExactSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids)
-        : database_bows(db_bows), database_ids(db_ids) {}
+    ExactSearch(const std::vector<std::vector<double>>& db_bows,
+                const std::vector<std::string>& db_ids);
 
     // Search function
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id);
