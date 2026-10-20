@@ -120,21 +120,16 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
     std::vector<ScoredId> ranked;
     // Use a set to ensure unique candidates and avoid duplicates
     std::unordered_set<std::size_t> unique;
-    // Rank candidates based on their Euclidean distance to the query
+    // Rank only candidates returned by the index. Approximate methods must not
+    // silently turn an empty candidate set into an exact search.
     for(const auto index : candidates) {
         if(index < database.size() && unique.insert(index).second) {
             ranked.emplace_back(Euclidiandistance(query, database[index]), index);
         }
     }
-    
-    // If no candidates were found, fall back to ranking all database entries
-    if(ranked.empty()) {
-        for(std::size_t i = 0; i < database.size(); ++i) {
-            ranked.emplace_back(Euclidiandistance(query, database[i]), i);
-        }
-    }
-    
-    // Sort the ranked candidates by distance and select the top 10 closest matches
+
+    // Select the top 10 among the candidates actually returned by the index.
+    // Missing positions are non-relevant by definition.
     std::sort(ranked.begin(), ranked.end());
     const int limit = std::min(10, static_cast<int>(ranked.size()));
     std::vector<std::string> top;
