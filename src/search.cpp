@@ -570,12 +570,13 @@ void evaluateAndWriteResults(const std::string& outputPath, const std::string& m
             output << "Rank-" << i + 1 << ": " << result.top_10_ids[i] << "\n";
         output << "\nRecall@5: " << result.recall_5
                << "\nRecall@10: " << result.recall_10
-               << "\nAP@10: " << result.ap_10
-               << "\n\nMean Recall@5: " << recall5 / count
-               << "\n\nMean Recall@10: " << recall10 / count
-               << "\n\nmAP@10: " << ap10 / count
-               << "\n\nAverage query time: " << time / count << "\n\n";
+               << "\nAP@10: " << result.ap_10 << "\n\n";
     }
+
+    output << "Mean Recall@5: " << recall5 / count
+           << "\n\nMean Recall@10: " << recall10 / count
+           << "\nmAP@10: " << ap10 / count
+           << "\n\nAverage query time: " << time / count << "\n\n";
 }
 
 } // namespace image_search
