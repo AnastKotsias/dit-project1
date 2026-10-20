@@ -4,6 +4,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -274,34 +275,58 @@ struct HypercubeSearch::Impl : DatabaseIndex {
     int probes;             // Number of probes to perform in the hypercube
     double width;           // Width parameter for the hypercube projections
     std::vector<Vector> vectors;
+    std::vector<double> offsets;
+    std::uint64_t bitSeed;
     std::unordered_map<int, std::vector<std::size_t>> buckets;
 
     // Constructor to initialize the Hypercube index with database vectors, identifiers, and hypercube parameters
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int projectionCount, double widthValue, int maxCount, int probeCount, int seed)
-            : DatabaseIndex{db, names}, projections(projectionCount), maxCandidates(maxCount), probes(probeCount), width(widthValue) {
+            : DatabaseIndex{db, names}, projections(projectionCount), maxCandidates(maxCount),
+              probes(probeCount), width(widthValue),
+              offsets(projectionCount), bitSeed(static_cast<std::uint64_t>(
+                  static_cast<std::int64_t>(seed))) {
         
-        if(projections > 20)
-            throw std::invalid_argument("Hypercube kproj must not exceed 20");
+        if(projections <= 0 || projections > 20)
+            throw std::invalid_argument("Hypercube kproj must be in the range 1..20");
+        if(width <= 0.0 || !std::isfinite(width))
+            throw std::invalid_argument("Hypercube width must be finite and positive");
 
         std::mt19937 rng(seed);
         std::normal_distribution<double> normal(0.0, 1.0);
+        std::uniform_real_distribution<double> offset(0.0, width);
         vectors.resize(projections, Vector(database.front().size()));
 
-        // Generate random projection vectors for the hypercube
-        for(auto& vector : vectors)
-            for(double& value : vector) 
+        for(int i = 0; i < projections; ++i) {
+            for(double& value : vectors[i])
                 value = normal(rng);
-        // Fill the hash buckets with the database vectors
+            offsets[i] = offset(rng);
+        }
+
         for(std::size_t i = 0; i < database.size(); ++i)
             buckets[hash(database[i])].push_back(i);
     }
 
-    // Hash function to compute the hypercube hash value for a given point
+    int mapToBit(int projection, std::int64_t bucket) const {
+        std::uint64_t value = bitSeed ^
+            (static_cast<std::uint64_t>(projection) +
+             0x9e3779b97f4a7c15ULL);
+        value ^= static_cast<std::uint64_t>(bucket) +
+            0x9e3779b97f4a7c15ULL + (value << 6) + (value >> 2);
+        value ^= value >> 30;
+        value *= 0xbf58476d1ce4e5b9ULL;
+        value ^= value >> 27;
+        value *= 0x94d049bb133111ebULL;
+        value ^= value >> 31;
+        return static_cast<int>(value & 1U);
+    }
+
     int hash(const Vector& point) const {
         int value = 0;
         for(int i = 0; i < projections; ++i) {
             const double dot = std::inner_product(point.begin(), point.end(), vectors[i].begin(), 0.0);
-            if(std::floor(dot / width) - std::floor(0.0 / width) >= 0.0)
+            const auto bucket = static_cast<std::int64_t>(
+                std::floor((dot + offsets[i]) / width));
+            if(mapToBit(i, bucket) != 0)
                 value |= (1 << i);
         }
         return value;
