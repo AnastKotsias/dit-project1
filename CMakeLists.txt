@@ -23,6 +23,7 @@ add_executable(search
     src/dataset.cpp
     src/pipeline.cpp
     src/search.cpp
+    src/experiment.cpp
 )
 
 target_include_directories(search PRIVATE include)

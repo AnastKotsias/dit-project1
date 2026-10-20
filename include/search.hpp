@@ -17,6 +17,9 @@ struct SearchResult {
     double query_time_ms;
 };
 
+double computeEuclideanDistance(const std::vector<double>& a,
+                                const std::vector<double>& b);
+
 class ExactSearch {
 private:
     struct Impl;

@@ -14,6 +14,7 @@
 #include "pipeline.hpp"
 #include "vocabulary.hpp"
 #include "search.hpp"
+#include "experiment.hpp"
 
 // holds parsed arguments
 struct Args {
@@ -38,6 +39,7 @@ struct Args {
     int ivf_nprobe = -1;     // resolved after the database size is known
     int m_param = -1;   // to handle default 500 for hypercube or 16 for pq later
     int pq_nbits = 8;
+    bool experiment = false;
 };
 
 // helper to safely parse ints and avoid stoi exceptions
@@ -87,6 +89,14 @@ Args parse_args(int argc, char** argv) {
         }
         
         bool is_method = (arg == "-exact" || arg == "-lsh" || arg == "-hypercube" || arg == "-ivfflat" || arg == "-ivfpq");
+        if(arg == "-experiment") {
+            if(args.experiment) {
+                std::cerr << "error: duplicate argument -experiment\n";
+                std::exit(EXIT_FAILURE);
+            }
+            args.experiment = true;
+            continue;
+        }
         if(is_method) {
             if(!args.method.empty()) {
                 std::cerr << "error: multiple methods flags provided\n";
@@ -135,8 +145,13 @@ Args parse_args(int argc, char** argv) {
         std::cerr << "error: missing required arguments (-hp, -mir, -split, -o, -vocab)\n";
         std::exit(EXIT_FAILURE);
     }
-    if(args.method.empty()) {
+    if(args.method.empty() && !args.experiment) {
         std::cerr << "error: exactly one search method flag is required\n";
+        std::exit(EXIT_FAILURE);
+    }
+
+    if(args.experiment && !args.method.empty()) {
+        std::cerr << "error: -experiment cannot be combined with a search method flag\n";
         std::exit(EXIT_FAILURE);
     }
 
@@ -205,6 +220,9 @@ Args parse_args(int argc, char** argv) {
         std::exit(EXIT_FAILURE);
     }
 
+    if(args.experiment)
+        return args;
+
     // resolving method specific defaults for M
     if(args.m_param == -1) {
         if(args.method == "hypercube") args.m_param = 500;
@@ -222,6 +240,20 @@ Args parse_args(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     Args args = parse_args(argc, argv);
+
+    if(args.experiment) {
+        try {
+            image_search::ExperimentRunner runner(
+                args.hp_path, args.mir_path, args.split_file,
+                args.vocab, args.s_max, args.seed);
+            runner.run(args.out_file);
+            std::cout << "wrote experiment results to " << args.out_file << "\n";
+            return EXIT_SUCCESS;
+        } catch(const std::exception& error) {
+            std::cerr << "error: experiment failed: " << error.what() << "\n";
+            return EXIT_FAILURE;
+        }
+    }
     
     std::map<std::string, std::vector<std::string>> splits;
     try {

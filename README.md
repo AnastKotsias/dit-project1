@@ -24,6 +24,7 @@ Euclidean distance, computes the retrieval metrics, and writes the result file.
 │   |── vocabulary.hpp
 |   └── search.hpp 
 ├── src/
+│   ├── experiment.cpp
 │   ├── dataset.cpp
 │   ├── image_features.cpp
 │   ├── main.cpp
@@ -34,6 +35,10 @@ Euclidean distance, computes the retrieval metrics, and writes the result file.
     ├── c_cpp_properties.json
     └── settings.json
 ```
+
+`experiment.cpp` contains the batch validation and test workflow. It is kept
+separate from `main.cpp` so the single-run command remains focused on argument
+handling and orchestration.
 
 The assignment PDFs and local datasets are external inputs and are not required
 to build the executable. Dataset directories are ignored by Git.
@@ -484,6 +489,30 @@ cmake --build build -j
   -ivfflat \
   -seed 1
 ```
+
+### Experiment mode
+
+Experiment mode reuses the common dataset, vocabulary, and seed arguments and
+writes Markdown-ready aggregate tables:
+
+```bash
+./build/search \
+  -hp path/to/hpatches \
+  -mir path/to/MIRFlickr-25K \
+  -split split.txt \
+  -vocab 256 \
+  -S 500 \
+  -seed 1 \
+  -o experimental_results.md \
+  -experiment
+```
+
+It tunes the approximate methods on validation with `D=10000`, selecting the
+configuration with the highest mAP@10, then evaluates Exact, LSH, Hypercube,
+IVFFlat, and IVFPQ on the test set for all four required distractor sizes.
+The report contains overall, illumination, and viewpoint aggregates. The
+validation grids focus on the principal quality/time parameters rather than
+performing an exhaustive search of every parameter.
 
 ### Common options
 
