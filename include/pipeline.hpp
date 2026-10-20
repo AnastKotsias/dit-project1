@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 
 #include "dataset.hpp"
+#include "image_features.hpp"
 
 namespace image_search {
 
@@ -17,6 +18,7 @@ struct TrainingDescriptorResult {
     std::size_t successful_images = 0;
     std::size_t failed_images = 0;
     std::vector<std::filesystem::path> failed_paths;
+    std::vector<SiftExtractionStatus> failed_statuses;
 };
 
 TrainingDescriptorResult extract_training_descriptors(
@@ -24,10 +26,15 @@ TrainingDescriptorResult extract_training_descriptors(
     int max_features,
     std::mt19937& rng);
 
+struct FailedImageRecord {
+    ImageRecord record;
+    SiftExtractionStatus status;
+};
+
 struct BowVectorResult {
     std::vector<std::vector<double>> vectors;
     std::vector<std::string> identifiers;
-    std::vector<ImageRecord> failed_records;
+    std::vector<FailedImageRecord> failed_records;
 };
 
 // A non-zero limit stops after that many successful records; zero processes all.

@@ -22,6 +22,7 @@ TrainingDescriptorResult extract_training_descriptors(
         } else {
             ++result.failed_images;
             result.failed_paths.push_back(path);
+            result.failed_statuses.push_back(extraction.status);
         }
     }
 
@@ -46,7 +47,7 @@ BowVectorResult extract_bow_vectors(
             std::filesystem::path(record.filepath));
         if(extraction.status != SiftExtractionStatus::Success ||
            extraction.descriptors.empty()) {
-            result.failed_records.push_back(record);
+            result.failed_records.push_back({record, extraction.status});
             continue;
         }
 

@@ -1,6 +1,7 @@
 #include "search.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -11,7 +12,6 @@
 #include <numeric>
 #include <random>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -33,15 +33,6 @@ double Euclidiandistance(const Vector& a, const Vector& b) {
         result += difference * difference;
     };
     return result;
-}
-
-// Generates a unique string key for a vector of integers, used for hashing in LSH
-std::string integerKey(const std::vector<int>& values) {
-    std::ostringstream key;
-    for(const int value : values) {
-        key << value << ',';
-    };
-    return key.str();
 }
 
 // Finds the "count" nearest centers to a given query vector
@@ -118,6 +109,14 @@ int checkedCodeCount(int bits) {
 
 // Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
+    assert(!database.empty());
+    assert(query.size() == database.front().size());
+    if(query.size() != database.front().size())
+        throw std::invalid_argument("query vector has inconsistent dimensions");
+    if(!std::all_of(query.begin(), query.end(),
+                    [](double value) { return std::isfinite(value); }))
+        throw std::invalid_argument("query vector contains non-finite values");
+
     std::vector<ScoredId> ranked;
     // Use a set to ensure unique candidates and avoid duplicates
     std::unordered_set<std::size_t> unique;
@@ -185,6 +184,13 @@ struct DatabaseIndex {
         for(const auto& vector : database) {
             if(vector.size() != database.front().size())
                 throw std::invalid_argument("database vectors have inconsistent dimensions");
+            if(!std::all_of(vector.begin(), vector.end(),
+                            [](double value) { return std::isfinite(value); }))
+                throw std::invalid_argument("database contains non-finite values");
+        }
+        for(const auto& id : ids) {
+            if(id.empty())
+                throw std::invalid_argument("database contains an empty identifier");
         }
     }
 };
@@ -215,58 +221,75 @@ SearchResult ExactSearch::search(const Vector& query, const std::string& queryId
 
 // LSHSearch class implementation
 struct LSHSearch::Impl : DatabaseIndex {
+    static constexpr std::uint64_t modulus = 1000000007ULL;
     int k;          // Number of hash functions per table
     int tables;     // Number of hash tables
     double width;   // Width parameter for the hash functions
     std::vector<std::vector<Vector>> projections;   // Projections for each hash table
     std::vector<std::vector<double>> offsets;       // Offsets for each hash function in each table
-    std::vector<std::unordered_map<std::string, std::vector<std::size_t>>> buckets;
+    std::vector<std::vector<std::uint64_t>> coefficients;
+    std::vector<std::unordered_map<std::uint64_t, std::vector<std::size_t>>> buckets;
 
     // Constructor to initialize the LSH index with database vectors, identifiers, and LSH parameters
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int kValue, int tableValue, double widthValue, int seed)
             : DatabaseIndex{db, names}, k(kValue), tables(tableValue), width(widthValue) {
+        if(k <= 0 || tables <= 0)
+            throw std::invalid_argument("LSH k and L must be strictly positive");
+        if(width <= 0.0 || !std::isfinite(width))
+            throw std::invalid_argument("LSH width must be finite and positive");
         
         std::mt19937 rng(seed);
         std::normal_distribution<double> normal(0.0, 1.0);
         std::uniform_real_distribution<double> offset(0.0, width);
+        std::uniform_int_distribution<std::uint64_t> coefficient(1, modulus - 1);
         projections.resize(tables);
         offsets.resize(tables);
+        coefficients.resize(tables);
         buckets.resize(tables);
 
         for(int t = 0; t < tables; ++t) {
             // Initialize projections and offsets for each hash table
             projections[t].resize(k, Vector(database.front().size()));
             offsets[t].resize(k);
+            coefficients[t].resize(k);
             for(int h = 0; h < k; ++h) {
                 for(double& value : projections[t][h]) {
                     value = normal(rng);
                 }
                 offsets[t][h] = offset(rng);
+                coefficients[t][h] = coefficient(rng);
             }
             // Insert database vectors into the hash buckets based on their hash values
             for(std::size_t i = 0; i < database.size(); ++i) {
-                std::vector<int> hash;
-                for(int h = 0; h < k; ++h) {
-                    double dot = std::inner_product(database[i].begin(), database[i].end(), projections[t][h].begin(), offsets[t][h]);
-                    hash.push_back(static_cast<int>(std::floor(dot / width)));
-                }
-                buckets[t][integerKey(hash)].push_back(i);
+                buckets[t][hash(database[i], t)].push_back(i);
             }
         }
+    }
+
+    std::uint64_t hash(const Vector& point, int table) const {
+        std::uint64_t combined = 0;
+        for(int h = 0; h < k; ++h) {
+            const double dot = std::inner_product(
+                point.begin(), point.end(), projections[table][h].begin(),
+                offsets[table][h]);
+            const auto bucket = static_cast<std::int64_t>(
+                std::floor(dot / width));
+            const auto normalized = static_cast<std::uint64_t>(
+                ((bucket % static_cast<std::int64_t>(modulus)) +
+                 static_cast<std::int64_t>(modulus)) %
+                static_cast<std::int64_t>(modulus));
+            combined = (combined +
+                        coefficients[table][h] * normalized) % modulus;
+        }
+        return combined;
     }
 
     // Querying the LSH index
     std::vector<std::size_t> candidates(const Vector& query) const {
         std::vector<std::size_t> result;
         for(int t = 0; t < tables; ++t) {
-            std::vector<int> hash;
-            // For each hash function in the table, compute the hash value for the query vector
-            for(int h = 0; h < k; ++h) {
-                double dot = std::inner_product(query.begin(), query.end(), projections[t][h].begin(), offsets[t][h]);
-                hash.push_back(static_cast<int>(std::floor(dot / width)));
-            }
             // Look up matching candidates in the hash bucket and add them to the result
-            const auto found = buckets[t].find(integerKey(hash));
+            const auto found = buckets[t].find(hash(query, t));
             if(found != buckets[t].end()) 
                 result.insert(result.end(), found->second.begin(), found->second.end());
         }

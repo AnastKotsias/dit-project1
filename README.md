@@ -234,6 +234,12 @@ keypoints.
 
 Each SIFT row is one 128-dimensional local descriptor.
 
+The pipeline preserves the extraction status for every failed record, so
+warnings and errors distinguish an unreadable or missing file from a valid
+image for which SIFT produced no descriptors. MIRFlickr scanning skips both
+failure types and continues through the numerically ordered files until the
+requested number of usable distractors has been collected.
+
 #### `sample_training_descriptors`
 
 The assignment limits the number of descriptors used to train the vocabulary.
@@ -566,7 +572,9 @@ Implemented:
 Implemented search methods:
 
 - Exact exhaustive Euclidean search
-- LSH with Gaussian p-stable projections and multiple hash tables
+- LSH with Gaussian p-stable projections and multiple hash tables. Each table
+  combines its `k` integer bucket hashes using seeded random coefficients:
+  `g(p) = sum(r_i h_i(p)) mod M`, with a fixed large modulus.
 - Hypercube search with projection vertices, Hamming-distance probes, and a
   maximum candidate limit
 - IVFFlat with k-means coarse centroids and `nprobe` lists
@@ -578,6 +586,13 @@ the candidates returned by their index; they do not fall back to exhaustive
 database ranking when no candidates are returned. Consequently, an
 approximate result may contain fewer than ten entries, and missing positions
 are treated as non-relevant when computing the metrics.
+
+Search constructors reject empty identifiers, inconsistent dimensions, and
+non-finite database values. Query dimensions are checked as an internal
+assertion and also reported as an exception in release builds; non-finite
+query values are rejected explicitly. An empty approximate candidate set is
+not an API error because the assignment defines missing result positions as
+non-relevant.
 
 Experiment mode writes a separate Markdown-ready report through `-o`, including
 the validation-selected parameters and aggregate test results for each

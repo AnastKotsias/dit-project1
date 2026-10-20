@@ -74,7 +74,9 @@ PreparedSet prepare_set(const EvaluationDataset& dataset,
     const auto database = extract_bow_vectors(dataset.database, vocabulary);
     if(!database.failed_records.empty()) {
         throw std::runtime_error("an HPatches database image failed descriptor extraction: " +
-                                 database.failed_records.front().filepath);
+                                 database.failed_records.front().record.filepath +
+                                 " (" + sift_extraction_status_name(
+                                     database.failed_records.front().status) + ")");
     }
 
     const auto distractors = extract_bow_vectors(
@@ -87,7 +89,9 @@ PreparedSet prepare_set(const EvaluationDataset& dataset,
     const auto queries = extract_bow_vectors(dataset.queries, vocabulary);
     if(!queries.failed_records.empty()) {
         throw std::runtime_error("a query image failed descriptor extraction: " +
-                                 queries.failed_records.front().filepath);
+                                 queries.failed_records.front().record.filepath +
+                                 " (" + sift_extraction_status_name(
+                                     queries.failed_records.front().status) + ")");
     }
 
     prepared.queries = queries.vectors;

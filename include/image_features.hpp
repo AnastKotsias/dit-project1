@@ -21,6 +21,8 @@ struct SiftExtractionResult {
 SiftExtractionResult extract_sift_descriptors(
     const std::filesystem::path& image_path);
 
+const char* sift_extraction_status_name(SiftExtractionStatus status);
+
 // sub-samples descriptors for training k-means using a shared prng state
 cv::Mat sample_training_descriptors(
     const cv::Mat& descriptors,

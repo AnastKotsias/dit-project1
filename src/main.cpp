@@ -274,9 +274,12 @@ int main(int argc, char** argv) {
     std::cout << "extracting and sampling sift descriptors for vocabulary...\n";
     const auto training_result = image_search::extract_training_descriptors(
         train_paths, args.s_max, rng);
-    for(const auto& path : training_result.failed_paths) {
+    for(std::size_t i = 0; i < training_result.failed_paths.size(); ++i) {
         std::cerr << "warning: failed to extract descriptors from training image: "
-                  << path << "\n";
+                  << training_result.failed_paths[i] << " ("
+                  << image_search::sift_extraction_status_name(
+                         training_result.failed_statuses[i])
+                  << ")\n";
     }
 
     if(training_result.successful_images == 0) {
@@ -317,7 +320,9 @@ int main(int argc, char** argv) {
         evaluation_dataset.database, vocabulary);
     for(const auto& record : hpatches_database.failed_records) {
         std::cerr << "warning: skipping invalid HPatches database image: "
-                  << record.filepath << "\n";
+                  << record.record.filepath << " ("
+                  << image_search::sift_extraction_status_name(record.status)
+                  << ")\n";
     }
 
     const auto distractors = image_search::extract_bow_vectors(
@@ -359,7 +364,10 @@ int main(int argc, char** argv) {
         evaluation_dataset.queries, vocabulary);
     if(!queries.failed_records.empty()) {
         std::cerr << "error: query image failed to produce descriptors: "
-                  << queries.failed_records.front().filepath << "\n";
+                  << queries.failed_records.front().record.filepath << " ("
+                  << image_search::sift_extraction_status_name(
+                         queries.failed_records.front().status)
+                  << ")\n";
         return EXIT_FAILURE;
     }
 

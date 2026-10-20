@@ -9,6 +9,18 @@
 
 namespace image_search {
 
+const char* sift_extraction_status_name(SiftExtractionStatus status) {
+    switch(status) {
+    case SiftExtractionStatus::Success:
+        return "success";
+    case SiftExtractionStatus::ImageUnreadable:
+        return "image unreadable or missing";
+    case SiftExtractionStatus::NoDescriptors:
+        return "no SIFT descriptors";
+    }
+    return "unknown extraction status";
+}
+
 SiftExtractionResult extract_sift_descriptors(
     const std::filesystem::path& image_path) {
     cv::Mat image = cv::imread(image_path.string(), cv::IMREAD_GRAYSCALE);
