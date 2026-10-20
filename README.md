@@ -73,8 +73,9 @@ src/main.cpp
 
 The headers define the public interfaces between modules. The `.cpp` files hide
 the implementation details. `main.cpp` is the orchestration layer: it selects
-the application policy for failures, while `pipeline.cpp` provides reusable
-image-preparation operations that can be tested independently.
+the application policy for failures, while `pipeline.cpp` and
+`experiment.cpp` provide reusable image-preparation and batch-evaluation
+operations that can be tested independently.
 
 ## `CMakeLists.txt`
 
@@ -347,7 +348,9 @@ This module includes the implementation of **Exact Search** (`ExactSearch` class
 - **Evaluation & Metrics**: Automatically evaluates each query against the ground-truth relevant HPatches images ($I_2$ through $I_6$ of the sequence) to compute:
   - `Recall@5` and `Recall@10`
   - `AP@10` (Average Precision)
-  - Query execution time in milliseconds
+  - Query execution time in milliseconds. Timing starts immediately before
+    the index query and stops after the ranked top-10 identifiers are
+    available; ground-truth construction and metric calculations are excluded.
 - **Output Generation**: Computes overall averages across all queries (`Mean Recall@5`, `Mean Recall@10`, `mAP@10`, and `Average query time`) and writes the final evaluation report to the path specified by `-o` adhering strictly to the required output format.
 
 ## `src/main.cpp`
@@ -470,6 +473,10 @@ based on the actual index size rather than the nominal requested size.
 ### Build
 
 ```bash
+# Required Makefile entry point
+make
+
+# Equivalent direct CMake workflow
 cmake -S . -B build
 cmake --build build -j
 ```
@@ -565,9 +572,16 @@ Implemented search methods:
 - IVFFlat with k-means coarse centroids and `nprobe` lists
 - IVFPQ with IVF coarse lists and product-quantized sub-vectors
 
-All methods write the assignment's result file through `-o`. Approximate
-indexes fall back to exhaustive ranking only when their candidate set is empty,
-so a query always produces a valid result.
+In single-run mode, all methods write the assignment's result file through
+`-o`. Exact search ranks the complete database. Approximate indexes rank only
+the candidates returned by their index; they do not fall back to exhaustive
+database ranking when no candidates are returned. Consequently, an
+approximate result may contain fewer than ten entries, and missing positions
+are treated as non-relevant when computing the metrics.
+
+Experiment mode writes a separate Markdown-ready report through `-o`, including
+the validation-selected parameters and aggregate test results for each
+required distractor size.
 
 ## Development configuration
 
