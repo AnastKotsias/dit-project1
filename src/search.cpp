@@ -423,31 +423,54 @@ struct IVFPQSearch::Impl : DatabaseIndex {
         if(database.front().size() % static_cast<std::size_t>(subquantizers) != 0)
             throw std::invalid_argument("IVFPQ subquantizers must divide vector dimension");
         
-        // Create inverted lists for each coarse cluster center
+        // Assign each database vector to its nearest coarse centroid.
         lists.resize(centers.size());
+        std::vector<std::size_t> coarse_assignments(database.size());
+        for(std::size_t i = 0; i < database.size(); ++i) {
+            coarse_assignments[i] = nearestCenters(
+                database[i], centers, 1).front();
+            lists[coarse_assignments[i]].push_back(i);
+        }
+
         std::vector<std::vector<Vector>> training(subquantizers);
-        const std::size_t width = database.front().size() / subquantizers;  // Width of each subvector for quantization
-        const std::size_t sampleLimit = std::min<std::size_t>(database.size(), 2048); // Limit the number of samples for training the codebooks to 2048 or the size of the database, whichever is smaller
-        
-        // Splitting the database vectors into subvectors
+        const std::size_t width =
+            database.front().size() / subquantizers;
+        const std::size_t sampleLimit =
+            std::min<std::size_t>(database.size(), 2048);
+
+        // Train PQ codebooks on subvectors of coarse-centroid residuals.
         for(std::size_t i = 0; i < sampleLimit; ++i) {
+            Vector residual(database[i].size());
+            const auto& center = centers[coarse_assignments[i]];
+            for(std::size_t d = 0; d < database[i].size(); ++d)
+                residual[d] = database[i][d] - center[d];
+
             for(int m = 0; m < subquantizers; ++m) {
-                training[m].emplace_back(database[i].begin() + m * width, database[i].begin() + (m + 1) * width);
+                training[m].emplace_back(
+                    residual.begin() + m * width,
+                    residual.begin() + (m + 1) * width);
             }
         }
-        // Train the codebooks for each subquantizer
+
         for(int m = 0; m < subquantizers; ++m)
             codebooks.push_back(kmeans(training[m], codeCount, seed + m + 1, 5));
+
         codes.resize(database.size());
 
-        // Assign each database vector to its nearest coarse cluster center
+        // Encode each database residual with the corresponding PQ codebooks.
         for(std::size_t i = 0; i < database.size(); ++i) {
-            const auto coarse = nearestCenters(database[i], centers, 1).front();
-            lists[coarse].push_back(i);
+            Vector residual(database[i].size());
+            const auto& center = centers[coarse_assignments[i]];
+            for(std::size_t d = 0; d < database[i].size(); ++d)
+                residual[d] = database[i][d] - center[d];
+
             codes[i].resize(subquantizers);
             for(int m = 0; m < subquantizers; ++m) {
-                Vector part(database[i].begin() + m * width, database[i].begin() + (m + 1) * width);
-                codes[i][m] = {static_cast<int>(nearestCenters(part, codebooks[m], 1).front())};
+                Vector part(
+                    residual.begin() + m * width,
+                    residual.begin() + (m + 1) * width);
+                codes[i][m] = {static_cast<int>(
+                    nearestCenters(part, codebooks[m], 1).front())};
             }
         }
     }
@@ -455,24 +478,27 @@ struct IVFPQSearch::Impl : DatabaseIndex {
     // Function to find candidate vectors for a given query
     std::vector<std::size_t> candidates(const Vector& query) const {
         const auto selected = nearestCenters(query, centers, probes);   // Find the nearest coarse cluster centers to the query vector
-        std::vector<std::size_t> result;
-        const std::size_t width = query.size() / subquantizers; // Width of each subvector
-        std::vector<std::vector<double>> lookup(subquantizers); // Lookup table to store distances
-        
-        // Build the lookup table for each subquantizer by calculating the distance between the query subvector and each centroid in the corresponding codebook
-        for(int m = 0; m < subquantizers; ++m) {
-            Vector part(query.begin() + m * width, query.begin() + (m + 1) * width);
-            for(const auto& centroid : codebooks[m]) {
-                lookup[m].push_back(Euclidiandistance(part, centroid));
-            }
-        }
-
-        // Score vectors using asymmetric distance estimation
         std::vector<ScoredId> ranked;
+        const std::size_t width = query.size() / subquantizers;
+
+        // Build one residual-PQ lookup table for each selected coarse cell.
+        std::vector<std::size_t> result;
         for(const auto center : selected) {
+            Vector query_residual(query.size());
+            for(std::size_t d = 0; d < query.size(); ++d)
+                query_residual[d] = query[d] - centers[center][d];
+
+            std::vector<std::vector<double>> lookup(subquantizers);
+            for(int m = 0; m < subquantizers; ++m) {
+                Vector part(
+                    query_residual.begin() + m * width,
+                    query_residual.begin() + (m + 1) * width);
+                for(const auto& centroid : codebooks[m])
+                    lookup[m].push_back(Euclidiandistance(part, centroid));
+            }
+
             for(const auto index : lists[center]) {
                 double score = 0.0;
-                // Approximate distance calculation for each subquantizer
                 for(int m = 0; m < subquantizers; ++m) {
                     score += lookup[m][codes[index][m][0]];
                 }
