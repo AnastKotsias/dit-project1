@@ -33,6 +33,38 @@ std::optional<int> extract_image_number(const std::filesystem::path& path) {
     return number;
 }
 
+std::vector<std::filesystem::path> list_mirflickr_images(
+    const std::string& mir_dir) {
+    namespace fs = std::filesystem;
+    const fs::path directory(mir_dir);
+    if(!fs::is_directory(directory)) {
+        throw std::runtime_error("MIRFlickr directory does not exist: " + mir_dir);
+    }
+
+    std::vector<fs::path> images;
+    for(const auto& entry : fs::directory_iterator(directory)) {
+        if(!entry.is_regular_file()) {
+            continue;
+        }
+        const auto extension = entry.path().extension().string();
+        if(extension == ".jpg" || extension == ".jpeg" ||
+           extension == ".JPG" || extension == ".JPEG") {
+            images.push_back(entry.path());
+        }
+    }
+
+    std::sort(images.begin(), images.end(),
+        [](const fs::path& left, const fs::path& right) {
+            const auto left_number = extract_image_number(left);
+            const auto right_number = extract_image_number(right);
+            if(left_number && right_number && *left_number != *right_number) {
+                return *left_number < *right_number;
+            }
+            return left.filename().string() < right.filename().string();
+        });
+    return images;
+}
+
 }  // namespace
 
 std::map<std::string, std::vector<std::string>> load_dataset_splits(
@@ -75,38 +107,6 @@ std::map<std::string, std::vector<std::string>> load_dataset_splits(
     }
 
     return splits;
-}
-
-std::vector<std::filesystem::path> list_mirflickr_images(
-    const std::string& mir_dir) {
-    namespace fs = std::filesystem;
-    const fs::path directory(mir_dir);
-    if(!fs::is_directory(directory)) {
-        throw std::runtime_error("MIRFlickr directory does not exist: " + mir_dir);
-    }
-
-    std::vector<fs::path> images;
-    for(const auto& entry : fs::directory_iterator(directory)) {
-        if(!entry.is_regular_file()) {
-            continue;
-        }
-        const auto extension = entry.path().extension().string();
-        if(extension == ".jpg" || extension == ".jpeg" ||
-           extension == ".JPG" || extension == ".JPEG") {
-            images.push_back(entry.path());
-        }
-    }
-
-    std::sort(images.begin(), images.end(),
-        [](const fs::path& left, const fs::path& right) {
-            const auto left_number = extract_image_number(left);
-            const auto right_number = extract_image_number(right);
-            if(left_number && right_number && *left_number != *right_number) {
-                return *left_number < *right_number;
-            }
-            return left.filename().string() < right.filename().string();
-        });
-    return images;
 }
 
 std::vector<std::filesystem::path> get_training_image_paths(
