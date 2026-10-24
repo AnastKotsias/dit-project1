@@ -7,3 +7,4 @@ cmake-build-*/
 data/
 HPatches/
 MIRFlickr-25K/
+build-release/
