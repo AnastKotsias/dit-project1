@@ -21,30 +21,40 @@ struct Args {
     std::string hp_path;
     std::string mir_path;
     std::string split_file;
+    // number K of visual words (-vocab), zero means not given
     int vocab = 0;
     int s_max = 500;
     int d_mir = 1000;
     std::string set_type = "validation";
     std::string out_file = "output.txt";
     int seed = 1;
+    // chosen search method without the leading dash, empty if none
     std::string method;
 
     // method specific parameters
+    // LSH hash functions per table (-k)
     int lsh_k = 4;
+    // LSH number of tables (-L)
     int lsh_l = 5;
+    // window width shared by LSH and hypercube (-w)
     double w = 0.05;
+    // hypercube dimension d' (-kproj)
     int hyper_kproj = 10;
+    // hypercube maximum number of vertices probed (-probes)
     int hyper_probes = 10;
     int ivf_kclusters = -1;  // to dynamically calculate sqrt(n) later
     int ivf_nprobe = -1;     // resolved after the database size is known
     int m_param = -1;   // to handle default 500 for hypercube or 16 for pq later
+    // bits per PQ code, so 2^nbits codebook entries (-nbits)
     int pq_nbits = 8;
+    // true when the full experimental study is requested (-experiment)
     bool experiment = false;
 };
 
 // helper to safely parse ints and avoid stoi exceptions
 int parse_int(const std::string& arg_name, const std::string& val_str) {
     try {
+        // number of characters consumed by the conversion
         size_t pos;
         int val = std::stoi(val_str, &pos);
         // rejecting partial matches like 256abc
@@ -53,6 +63,7 @@ int parse_int(const std::string& arg_name, const std::string& val_str) {
         }
         return val;
     } catch(const std::exception&) {
+        // covers non-numeric text, out-of-range values and trailing characters
         std::cerr << "error: invalid integer value for " << arg_name << "\n";
         std::exit(EXIT_FAILURE);
     }
@@ -62,6 +73,7 @@ int parse_int(const std::string& arg_name, const std::string& val_str) {
 double parse_double(const std::string& arg_name, const std::string& val_str) {
     try {
         size_t pos;
+        // stod accepts a numeric prefix, so the consumed length is checked below
         double val = std::stod(val_str, &pos);
         // rejecting partial matches
         if(pos != val_str.length()) {
@@ -77,9 +89,11 @@ double parse_double(const std::string& arg_name, const std::string& val_str) {
 // parsing arguments from command line
 Args parse_args(int argc, char** argv) {
     Args args;
+    // options seen so far, used to detect duplicates and invalid combinations
     std::set<std::string> parsed_options;
 
     for(int i = 1 ; i < argc ; ++i) {
+        // current token, expected to be an option name
         std::string arg = argv[i];
 
         // checking for duplicate arguments to prevent silent overwriting
@@ -88,7 +102,9 @@ Args parse_args(int argc, char** argv) {
             std::exit(EXIT_FAILURE);
         }
         
+        // method flags are switches that take no value
         bool is_method = (arg == "-exact" || arg == "-lsh" || arg == "-hypercube" || arg == "-ivfflat" || arg == "-ivfpq");
+        // -experiment is also a switch without a value
         if(arg == "-experiment") {
             if(args.experiment) {
                 std::cerr << "error: duplicate argument -experiment\n";
@@ -102,9 +118,11 @@ Args parse_args(int argc, char** argv) {
                 std::cerr << "error: multiple methods flags provided\n";
                 std::exit(EXIT_FAILURE);
             }
+            // store the name without the leading dash
             args.method = arg.substr(1);
             continue;
         }
+        // every remaining option takes a value
         parsed_options.insert(arg);
 
         if(i + 1 >= argc) {
@@ -155,6 +173,7 @@ Args parse_args(int argc, char** argv) {
         std::exit(EXIT_FAILURE);
     }
 
+    // reject options that do not belong to the chosen method
     if(args.method == "exact" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
                                 parsed_options.count("-kproj") || parsed_options.count("-probes") || parsed_options.count("-kclusters") ||
                                 parsed_options.count("-nprobe") || parsed_options.count("-M") || parsed_options.count("-nbits"))) {
@@ -196,11 +215,13 @@ Args parse_args(int argc, char** argv) {
     }
 
     // validating method specific parameter constraints
+    // -k, -L, -w, -kproj, -probes and -nbits have defaults, so they must be positive
     if(args.lsh_k <= 0 || args.lsh_l <= 0 || args.w <= 0.0 || args.hyper_kproj <= 0 ||
         args.hyper_probes <= 0 || args.pq_nbits <= 0) {
         std::cerr << "error: method parameters (k, L, w, kproj, probes, nbits) must be strictly positive\n";
         std::exit(EXIT_FAILURE);
     }
+    // rejects nan and inf, which pass the positivity check above
     if(!std::isfinite(args.w) || args.w <= 0.0) {
         std::cerr << "error: -w must be finite and strictly positive\n";
         std::exit(EXIT_FAILURE);
@@ -220,6 +241,7 @@ Args parse_args(int argc, char** argv) {
         std::exit(EXIT_FAILURE);
     }
 
+    // experiment mode sets its own parameters, so method defaults are not needed
     if(args.experiment)
         return args;
 
@@ -238,9 +260,12 @@ Args parse_args(int argc, char** argv) {
     return args;
 }
 
+// entry point that trains the vocabulary, builds the database, runs the chosen method and writes the results
 int main(int argc, char** argv) {
+    // parsing exits the program with a message on invalid input
     Args args = parse_args(argc, argv);
 
+    // experiment mode runs the whole study and ignores the single-run flow below
     if(args.experiment) {
         try {
             image_search::ExperimentRunner runner(
@@ -255,6 +280,7 @@ int main(int argc, char** argv) {
         }
     }
     
+    // step 1, read the split file
     std::map<std::string, std::vector<std::string>> splits;
     try {
         splits = image_search::load_dataset_splits(args.split_file);
@@ -263,6 +289,7 @@ int main(int argc, char** argv) {
                   << error.what() << "\n";
         return EXIT_FAILURE;
     }
+    // splits["train"] holds the sequences used for the vocabulary
     std::cout << "loaded " << splits["train"].size() << " training sequences\n";
     
     // resolving paths for training images
@@ -271,9 +298,11 @@ int main(int argc, char** argv) {
 
     // setting up random number generator for sampling
     std::mt19937 rng(args.seed);
+    // step 2, extract and sample SIFT descriptors of the training images
     std::cout << "extracting and sampling sift descriptors for vocabulary...\n";
     const auto training_result = image_search::extract_training_descriptors(
         train_paths, args.s_max, rng);
+    // failed training images only produce warnings, the vocabulary can still be built from the rest
     for(std::size_t i = 0; i < training_result.failed_paths.size(); ++i) {
         std::cerr << "warning: failed to extract descriptors from training image: "
                   << training_result.failed_paths[i] << " ("
@@ -282,11 +311,13 @@ int main(int argc, char** argv) {
                   << ")\n";
     }
 
+    // nothing to cluster if every image failed
     if(training_result.successful_images == 0) {
         std::cerr << "error: all training images failed descriptor extraction\n";
         return EXIT_FAILURE;
     }
 
+    // step 3, cluster the sampled descriptors into K visual words
     std::cout << "computing visual vocabulary with k=" << args.vocab << "...\n";
     cv::Mat vocabulary;
     try {
@@ -298,6 +329,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    // defensive check that k-means returned centroids
     if(vocabulary.empty()) {
         std::cerr << "error: failed to compute vocabulary\n";
         return EXIT_FAILURE;
@@ -306,6 +338,7 @@ int main(int argc, char** argv) {
     << training_result.successful_images << " images ("
     << training_result.failed_images << " failed)\n";
 
+    // step 4, collect the queries, database images and distractor pool of the chosen split
     image_search::EvaluationDataset evaluation_dataset;
     try {
         evaluation_dataset = image_search::get_evaluation_paths(
@@ -316,6 +349,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    // convert the HPatches database images to BoW vectors, skipping unusable ones with a warning
     const auto hpatches_database = image_search::extract_bow_vectors(
         evaluation_dataset.database, vocabulary);
     for(const auto& record : hpatches_database.failed_records) {
@@ -325,8 +359,10 @@ int main(int argc, char** argv) {
                   << ")\n";
     }
 
+    // take the first D usable MIRFlickr images as distractors
     const auto distractors = image_search::extract_bow_vectors(
         evaluation_dataset.distractor_pool, vocabulary, args.d_mir);
+    // fewer than D means the pool ran out of usable images
     const auto distractors_added = distractors.vectors.size();
     if(distractors_added < static_cast<std::size_t>(args.d_mir)) {
         std::cerr << "error: ran out of MIRFlickr images before reaching -D="
@@ -334,6 +370,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    // final database is the HPatches vectors followed by the distractors
     std::vector<std::vector<double>> database_bows = hpatches_database.vectors;
     std::vector<std::string> database_ids = hpatches_database.identifiers;
     database_bows.insert(database_bows.end(), distractors.vectors.begin(),
@@ -341,17 +378,21 @@ int main(int argc, char** argv) {
     database_ids.insert(database_ids.end(), distractors.identifiers.begin(),
                         distractors.identifiers.end());
 
+    // database size n, needed for the default number of IVF clusters
     const int n_database = static_cast<int>(database_bows.size());
     if(n_database <= 0) {
         std::cerr << "error: database contains no usable image vectors\n";
         return EXIT_FAILURE;
     }
 
+    // fill in IVF defaults that depend on the database size, which was unknown during parsing
     if(args.method == "ivfflat" || args.method == "ivfpq") {
+        // default number of clusters is ceil(sqrt(n))
         if(args.ivf_kclusters == -1) {
             args.ivf_kclusters = static_cast<int>(
                 std::ceil(std::sqrt(static_cast<double>(n_database))));
         }
+        // default number of probed clusters is 5
         if(args.ivf_nprobe == -1) {
             args.ivf_nprobe = 5;
         }
@@ -360,8 +401,10 @@ int main(int argc, char** argv) {
                   << ", nprobe=" << args.ivf_nprobe << "\n";
     }
 
+    // step 5, convert the query images, one per sequence, to BoW vectors
     const auto queries = image_search::extract_bow_vectors(
         evaluation_dataset.queries, vocabulary);
+    // a missing query cannot be evaluated, so this is treated as an error
     if(!queries.failed_records.empty()) {
         std::cerr << "error: query image failed to produce descriptors: "
                   << queries.failed_records.front().record.filepath << " ("
@@ -375,10 +418,15 @@ int main(int argc, char** argv) {
               << " database vectors and " << queries.vectors.size()
               << " query vectors\n";
 
+    // step 6, build the chosen index and run every query
     try {
+        // one result per query
         std::vector<image_search::SearchResult> all_results;
         all_results.reserve(queries.vectors.size());
+        // method label printed at the top of each result block
         std::string output_name;
+
+        // each branch builds its index and searches with every query, passing the query's sequence name for relevance
 
         if(args.method == "exact") {
             image_search::ExactSearch index(database_bows, database_ids);
@@ -424,6 +472,7 @@ int main(int argc, char** argv) {
             output_name = "IVFPQ";
         }
 
+        // step 7, write the rankings and metrics to the output file
         image_search::evaluateAndWriteResults(args.out_file, output_name, all_results);
         std::cout << "wrote search results to " << args.out_file << "\n";
     } catch(const std::exception& error) {

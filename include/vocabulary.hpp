@@ -7,13 +7,13 @@
 
 namespace image_search {
 
-// computes visual vocabulary centroids using k-means on training descriptors
+// runs k-means on the pooled training descriptors and returns the vocab_size centroids as matrix rows
 cv::Mat compute_visual_vocabulary(
     const std::vector<cv::Mat>& training_descriptors,
     int vocab_size,
     int seed);
 
-// computes bag of visual words normalized histogram for an image descriptor matrix
+// assigns each descriptor to its nearest centroid and returns the histogram normalized to sum to 1
 std::vector<double> compute_image_bow_histogram(
     const cv::Mat& descriptors,
     const cv::Mat& vocabulary);
