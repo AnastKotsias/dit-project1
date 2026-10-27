@@ -27,7 +27,7 @@ double computeEuclideanDistance(const std::vector<double>& a,
 // exhaustive search that compares the query against every database vector
 class ExactSearch {
 private:
-    // implementation details are hidden in search.cpp (pimpl idiom)
+    // implementation details are hidden in src/search/ (pimpl idiom)
     struct Impl;
     // shared pointer keeps the class cheap to copy while sharing one index
     std::shared_ptr<Impl> impl;

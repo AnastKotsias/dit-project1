@@ -22,7 +22,13 @@ add_executable(search
     src/vocabulary.cpp
     src/dataset.cpp
     src/pipeline.cpp
-    src/search.cpp
+    src/search/common.cpp
+    src/search/exact.cpp
+    src/search/lsh.cpp
+    src/search/hypercube.cpp
+    src/search/ivfflat.cpp
+    src/search/ivfpq.cpp
+    src/search/output.cpp
     src/experiment.cpp
 )
 

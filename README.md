@@ -30,7 +30,15 @@ Euclidean distance, computes the retrieval metrics, and writes the result file.
 │   ├── main.cpp
 │   ├── pipeline.cpp
 │   ├── vocabulary.cpp
-|   └── search.cpp
+│   └── search/
+│       ├── common.hpp
+│       ├── common.cpp
+│       ├── exact.cpp
+│       ├── lsh.cpp
+│       ├── hypercube.cpp
+│       ├── ivfflat.cpp
+│       ├── ivfpq.cpp
+│       └── output.cpp
 └── .vscode/
     ├── c_cpp_properties.json
     └── settings.json
@@ -347,6 +355,23 @@ of zero processes every record. The helper does not decide whether failed
 records are warnings or fatal errors.
 
 ## Search Implementation and Evaluation Module
+
+The public interface is the single header
+[`include/search.hpp`](include/search.hpp). Its implementation is split by
+method under [`src/search/`](src/search/):
+
+| File | Contents |
+|---|---|
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance, nearest-center lookup, the k-means used by IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, and `buildResult`, which reranks candidates and computes the metrics. Also defines the public `computeEuclideanDistance`. |
+| `exact.cpp` | `ExactSearch` |
+| `lsh.cpp` | `LSHSearch` |
+| `hypercube.cpp` | `HypercubeSearch` |
+| `ivfflat.cpp` | `IVFFlatSearch` |
+| `ivfpq.cpp` | `IVFPQSearch` |
+| `output.cpp` | `evaluateAndWriteResults`, which writes the result file |
+
+`common.hpp` is kept in `src/` rather than `include/` because it is an
+internal header of the search module and not part of its public interface.
 
 This module includes the implementation of **Exact Search** (`ExactSearch` class) and evaluation metrics:
 

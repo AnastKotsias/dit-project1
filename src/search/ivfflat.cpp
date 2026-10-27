@@ -1,0 +1,53 @@
+#include "common.hpp"
+
+#include <chrono>
+#include <memory>
+
+namespace image_search {
+// shared helpers and aliases from common.hpp
+using namespace detail;
+
+// IVFFlatSearch class implementation
+// IVFFlat index, which keeps full vectors in one inverted list per k-means cluster
+struct IVFFlatSearch::Impl : DatabaseIndex {
+    // number of nearest clusters searched per query
+    int probes;
+    // cluster centers trained on the database vectors
+    std::vector<Vector> centers;
+    // database indices belonging to each cluster
+    std::vector<std::vector<std::size_t>> lists;
+
+    // Constructor to initialize the IVFFlat index
+    Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int probeCount, int seed)
+            : DatabaseIndex{db, names}, probes(probeCount), centers(kmeans(db, clusterCount, seed)) {
+
+        // Create inverted lists for each cluster center
+        lists.resize(centers.size());
+        for(std::size_t i = 0; i < database.size(); ++i) {
+            lists[nearestCenters(database[i], centers, 1).front()].push_back(i);
+        }
+    }
+
+    // Function to find candidate vectors for a given query
+    std::vector<std::size_t> candidates(const Vector& query) const {
+        // the probes closest clusters to the query
+        const auto selected = nearestCenters(query, centers, probes);
+        std::vector<std::size_t> result;
+        // every vector of those clusters is a candidate
+        for(const auto center : selected)
+            result.insert(result.end(), lists[center].begin(), lists[center].end());
+        return result;
+    }
+};
+
+// IVFFlatSearch constructor
+IVFFlatSearch::IVFFlatSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int clusters, int probes, int seed)
+    : impl(std::make_shared<Impl>(db, ids, clusters, probes, seed)) {}
+
+// IVFFlatSearch search function
+SearchResult IVFFlatSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
+    const auto start = std::chrono::high_resolution_clock::now();
+    return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
+}
+
+} // namespace image_search
