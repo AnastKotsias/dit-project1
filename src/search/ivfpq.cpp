@@ -6,6 +6,7 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <utility>
 
 namespace image_search {
 // shared helpers and aliases from common.hpp
@@ -36,19 +37,19 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
     // trains the coarse clusters, the PQ codebooks and encodes the whole database
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int probeCount, int subCount, int bits, int seed)
-            : DatabaseIndex{db, names}, probes(probeCount), subquantizers(subCount), codeCount(checkedCodeCount(bits)), centers(kmeans(db, clusterCount, seed)) {
+            : DatabaseIndex{db, names}, probes(probeCount), subquantizers(subCount), codeCount(checkedCodeCount(bits)) {
         // Check for valid subquantizer count and ensure it divides the vector dimension
         if(subquantizers <= 0)
             throw std::invalid_argument("IVFPQ M must be positive");
         if(database.front().size() % static_cast<std::size_t>(subquantizers) != 0)
             throw std::invalid_argument("IVFPQ subquantizers must divide vector dimension");
 
-        // Assign each database vector to its nearest coarse centroid.
+        auto coarse = clusterVectors(database, clusterCount, seed);
+        centers = std::move(coarse.centers);
+        // k-means already assigned each database vector to its nearest coarse centroid
+        const std::vector<std::size_t> coarse_assignments = std::move(coarse.assignments);
         lists.resize(centers.size());
-        std::vector<std::size_t> coarse_assignments(database.size());
         for(std::size_t i = 0; i < database.size(); ++i) {
-            coarse_assignments[i] = nearestCenters(
-                database[i], centers, 1).front();
             lists[coarse_assignments[i]].push_back(i);
         }
 
@@ -84,7 +85,7 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
         // one k-means codebook of 2^nbits entries per subquantizer
         for(int m = 0; m < subquantizers; ++m)
-            codebooks.push_back(kmeans(training[m], codeCount, seed + m + 1, 5));
+            codebooks.push_back(clusterVectors(training[m], codeCount, seed + m + 1).centers);
 
         // codes[i][m] holds the codebook entry chosen for subvector m of vector i
         codes.resize(database.size());

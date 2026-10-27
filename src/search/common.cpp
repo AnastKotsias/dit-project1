@@ -1,10 +1,10 @@
 #include "common.hpp"
 
+#include "kmeans.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <numeric>
-#include <random>
 #include <set>
 #include <stdexcept>
 #include <unordered_set>
@@ -33,11 +33,11 @@ std::vector<std::size_t> nearestCenters(const Vector& query, const std::vector<V
     for(std::size_t i = 0; i < centers.size(); ++i) {
         distances.emplace_back(squaredEuclideanDistance(query, centers[i]), i);
     };
-    // pairs sort by distance first, so the nearest centers come first
-    std::sort(distances.begin(), distances.end());
-
     // Ensure we don't exceed the number of available centers
-    count = std::min(count, static_cast<int>(distances.size()));
+    count = std::max(0, std::min(count, static_cast<int>(distances.size())));
+    // pairs sort by distance first, so the nearest centers come first
+    // only the first count positions are needed, so the rest is left unsorted
+    std::partial_sort(distances.begin(), distances.begin() + count, distances.end());
     std::vector<std::size_t> result;
 
     // Collect the nearest centers
@@ -48,55 +48,33 @@ std::vector<std::size_t> nearestCenters(const Vector& query, const std::vector<V
     return result;
 }
 
-// simple lloyd k-means with random initial centers, used for the IVF coarse clusters and PQ codebooks
-std::vector<Vector> kmeans(const std::vector<Vector>& points, int requested, int seed, int iterations) {
+// runs the shared k-means on the points, converting them to and from the row-major Matrix it works on
+Clustering clusterVectors(const std::vector<Vector>& points, int requested, int seed) {
     // nothing to cluster
-    if (points.empty())
+    if(points.empty() || requested <= 0)
         return {};
 
+    // copy the points into one contiguous matrix
+    Matrix<double> matrix(points.size(), points.front().size());
+    for(std::size_t i = 0; i < points.size(); ++i) {
+        if(points[i].size() != matrix.cols)
+            throw std::invalid_argument("clustered vectors have inconsistent dimensions");
+        std::copy(points[i].begin(), points[i].end(), matrix.row(i));
+    }
+
     // Ensure we don't request more clusters than available points
-    const int k = std::min(requested, static_cast<int>(points.size()));
+    const std::size_t k = std::min(static_cast<std::size_t>(requested), points.size());
+    auto result = image_search::kmeans(matrix, k, seed);
 
-    // Initialize random number generator for shuffling
-    std::mt19937 rng(seed);
-    // shuffled point indices, the first k of which become the initial centers
-    std::vector<std::size_t> order(points.size());
-    std::iota(order.begin(), order.end(), 0);
-    std::shuffle(order.begin(), order.end(), rng);
-
-    // Select initial centers from the shuffled points
-    std::vector<Vector> centers;
-    for(int i = 0; i < k; ++i) {
-        centers.push_back(points[order[i]]);
+    // copy the centers back into one vector per center
+    Clustering clustering;
+    clustering.centers.reserve(result.centers.rows);
+    for(std::size_t c = 0; c < result.centers.rows; ++c) {
+        const double* center = result.centers.row(c);
+        clustering.centers.emplace_back(center, center + result.centers.cols);
     }
-
-    // Vector to hold the assignment of each point to a center
-    std::vector<int> assignments(points.size(), 0);
-    // fixed number of lloyd iterations instead of a convergence test
-    for(int iteration = 0; iteration < iterations; ++iteration) {
-        // running coordinate sums and member counts of each cluster for this iteration
-        std::vector<Vector> sums(k, Vector(points.front().size(), 0.0));
-        std::vector<int> counts(k, 0);
-        for(std::size_t i = 0; i < points.size(); ++i) {
-            // Assign each point to the nearest center
-            assignments[i] = static_cast<int>(nearestCenters(points[i], centers, 1).front());
-            ++counts[assignments[i]];
-
-            // add the point to the sum of its cluster
-            for(std::size_t d = 0; d < points[i].size(); ++d) {
-                sums[assignments[i]][d] += points[i][d];
-            }
-        }
-        // Update centers based on the mean of assigned points
-        for(int c = 0; c < k; ++c) {
-            // empty clusters keep their previous center
-            if(counts[c] != 0) {
-                for(double& value : sums[c]) value /= counts[c];
-                centers[c] = std::move(sums[c]);
-            }
-        }
-    }
-    return centers;
+    clustering.assignments = std::move(result.assignments);
+    return clustering;
 }
 
 // Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search

@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# default to an optimized build, k-means and BoW construction are far too slow without optimization
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 
@@ -14,7 +19,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
-find_package(OpenCV REQUIRED)
+# OpenCV is used only to read images (imgcodecs) and compute SIFT descriptors (features2d)
+find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
 
 add_executable(search
     src/main.cpp

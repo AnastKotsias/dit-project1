@@ -25,8 +25,16 @@ double squaredEuclideanDistance(const Vector& a, const Vector& b);
 // Finds the "count" nearest centers to a given query vector
 std::vector<std::size_t> nearestCenters(const Vector& query, const std::vector<Vector>& centers, int count);
 
-// simple lloyd k-means with random initial centers, used for the IVF coarse clusters and PQ codebooks
-std::vector<Vector> kmeans(const std::vector<Vector>& points, int requested, int seed, int iterations = 8);
+// centers and per-point assignments of a clustering of BoW vectors
+struct Clustering {
+    std::vector<Vector> centers;
+    // index of the nearest center of every input point
+    std::vector<std::size_t> assignments;
+};
+
+// runs the shared k-means of kmeans.hpp on the points, used for the IVF coarse clusters and PQ codebooks
+// the number of clusters is capped at the number of points
+Clustering clusterVectors(const std::vector<Vector>& points, int requested, int seed);
 
 // Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start);

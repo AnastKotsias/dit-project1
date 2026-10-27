@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <memory>
+#include <utility>
 
 namespace image_search {
 // shared helpers and aliases from common.hpp
@@ -19,12 +20,14 @@ struct IVFFlatSearch::Impl : DatabaseIndex {
 
     // Constructor to initialize the IVFFlat index
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int probeCount, int seed)
-            : DatabaseIndex{db, names}, probes(probeCount), centers(kmeans(db, clusterCount, seed)) {
+            : DatabaseIndex{db, names}, probes(probeCount) {
+        auto clustering = clusterVectors(database, clusterCount, seed);
+        centers = std::move(clustering.centers);
 
-        // Create inverted lists for each cluster center
+        // Create inverted lists for each cluster center, k-means already found each vector's nearest center
         lists.resize(centers.size());
         for(std::size_t i = 0; i < database.size(); ++i) {
-            lists[nearestCenters(database[i], centers, 1).front()].push_back(i);
+            lists[clustering.assignments[i]].push_back(i);
         }
     }
 

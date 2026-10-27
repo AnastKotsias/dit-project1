@@ -1,11 +1,17 @@
 #include "vocabulary.hpp"
-#include <opencv2/ml.hpp>
-#include <opencv2/features2d.hpp>
+#include "kmeans.hpp"
 #include <algorithm>
 #include <stdexcept>
-#include <cmath>
 
 namespace image_search {
+// helpers below are private to this translation unit
+namespace {
+
+// upper bound on lloyd iterations for the SIFT vocabulary, k-means usually stops earlier
+// when no descriptor changes cluster
+constexpr int kVocabularyIterations = 100;
+
+}  // namespace
 
 // builds the visual vocabulary c_1..c_K by clustering the SIFT descriptors of the training images
 DescriptorMatrix compute_visual_vocabulary(
@@ -56,7 +62,7 @@ DescriptorMatrix compute_visual_vocabulary(
         throw std::invalid_argument("total training descriptors are fewer than vocabulary size");
     }
 
-    // concatenating all training descriptors into a single large mat
+    // concatenating all training descriptors into a single matrix
     DescriptorMatrix all_descriptors(total_rows, cols);
     // next free row in the combined matrix
     std::size_t current_row = 0;
@@ -67,39 +73,9 @@ DescriptorMatrix compute_visual_vocabulary(
         current_row += mat.rows;
     }
 
-    // TEMPORARY: cv::Mat view over our storage until compute_visual_vocabulary uses our own k-means
-    cv::Mat all_view(static_cast<int>(total_rows), static_cast<int>(cols), CV_32F,
-                     all_descriptors.data.data());
-
-    // control randomness using the requested seed
-    cv::theRNG().state = static_cast<uint64>(seed);
-
-    // output matrix of centroids, one per row
-    cv::Mat centers;
-    // per-descriptor cluster assignment, required by the API but not used afterwards
-    cv::Mat labels;
-    // stop after 100 iterations or when centers move by less than 1e-4, whichever comes first
-    cv::TermCriteria criteria(cv::TermCriteria::MAX_ITER + cv::TermCriteria::EPS, 100, 1e-4);
-
-    // running opencv kmeans with kmeanspp initialization
-    cv::kmeans(
-        all_view,
-        vocab_size,
-        labels,
-        criteria,
-        // number of independent runs, the best one in terms of compactness is kept
-        3,
-        cv::KMEANS_PP_CENTERS,
-        centers
-    );
-
-    // copy the centroids back into our own matrix type
-    DescriptorMatrix vocabulary(static_cast<std::size_t>(centers.rows), cols);
-    for(std::size_t r = 0; r < vocabulary.rows; ++r) {
-        const float* source = centers.ptr<float>(static_cast<int>(r));
-        std::copy(source, source + cols, vocabulary.row(r));
-    }
-    return vocabulary;
+    // lloyd's algorithm with k-means++ initialization, implemented in kmeans.cpp
+    return kmeans(all_descriptors, static_cast<std::size_t>(vocab_size), seed,
+                  kVocabularyIterations).centers;
 }
 
 // builds the normalized bag of visual words vector x_I = (h_1/n_I, ..., h_K/n_I) for one image
@@ -127,29 +103,11 @@ std::vector<double> compute_image_bow_histogram(
         throw std::invalid_argument("descriptor dimension does not match vocabulary dimension");
     }
 
-    // TEMPORARY: cv::Mat views over our storage until the matcher is replaced by nearest_center
-    const cv::Mat descriptors_view(static_cast<int>(descriptors.rows),
-                                   static_cast<int>(descriptors.cols), CV_32F,
-                                   const_cast<float*>(descriptors.data.data()));
-    const cv::Mat vocabulary_view(static_cast<int>(vocabulary.rows),
-                                  static_cast<int>(vocabulary.cols), CV_32F,
-                                  const_cast<float*>(vocabulary.data.data()));
-    // using opencv brute force matcher for optimized nearest neighbor search
-    cv::BFMatcher matcher(cv::NORM_L2);
-    // one match per descriptor, holding the index of its nearest centroid
-    std::vector<cv::DMatch> matches;
-    // finds for each descriptor the closest centroid under euclidean distance
-    matcher.match(descriptors_view, vocabulary_view, matches);
-
     // n_I, the total number of descriptors of the image
     const std::size_t n_descriptors = descriptors.rows;
-    // increment the counter h_j of the centroid c_j each descriptor was assigned to
-    for(const auto& match : matches) {
-        // trainIdx refers to a row of the vocabulary, so it must be a valid centroid index
-        if(match.trainIdx < 0 || static_cast<std::size_t>(match.trainIdx) >= vocab_size) {
-            throw std::runtime_error("nearest-word assignment returned an invalid index");
-        }
-        histogram[match.trainIdx] += 1.0;
+    // increment the counter h_j of the centroid c_j nearest to each descriptor, under euclidean distance
+    for(std::size_t r = 0; r < n_descriptors; ++r) {
+        histogram[nearest_center(descriptors.row(r), vocabulary)] += 1.0;
     }
 
     // normalizing histogram by total descriptors count

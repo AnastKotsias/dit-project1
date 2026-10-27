@@ -19,14 +19,18 @@ Euclidean distance, computes the retrieval metrics, and writes the result file.
 ├── split.txt
 ├── include/
 │   ├── dataset.hpp
+│   ├── experiment.hpp
 │   ├── image_features.hpp
+│   ├── kmeans.hpp
+│   ├── matrix.hpp
 │   ├── pipeline.hpp
-│   |── vocabulary.hpp
-|   └── search.hpp 
+│   ├── search.hpp
+│   └── vocabulary.hpp
 ├── src/
 │   ├── experiment.cpp
 │   ├── dataset.cpp
 │   ├── image_features.cpp
+│   ├── kmeans.cpp
 │   ├── main.cpp
 │   ├── pipeline.cpp
 │   ├── vocabulary.cpp
@@ -70,13 +74,13 @@ src/main.cpp
     ├── pipeline module ◄──────── image paths and dataset records
     │       │
     │       ├── image_features module
-    │       │       └── SIFT descriptor matrices (cv::Mat)
+    │       │       └── SIFT descriptor matrices (DescriptorMatrix)
     │       │
     │       └── vocabulary module
     │               └── normalized BoVW histograms (K doubles)
     │
     └── vocabulary module ◄────── sampled training descriptors
-            └── visual vocabulary (K × 128 cv::Mat)
+            └── visual vocabulary (K × 128 DescriptorMatrix)
 ```
 
 The headers define the public interfaces between modules. The `.cpp` files hide
@@ -92,10 +96,24 @@ operations that can be tested independently.
 1. Requires CMake 3.20 or newer.
 2. Declares a C++ project and requires C++20.
 3. Enables `compile_commands.json` generation.
-4. Locates OpenCV with `find_package(OpenCV REQUIRED)`.
-5. Builds the `search` executable from all project source files.
-6. Adds `include/` to the header search path.
-7. Links the executable with the OpenCV libraries.
+4. Defaults to a `Release` (optimized) build when no build type is given, since
+   k-means and BoVW construction are very slow without optimization. Pass
+   `-DCMAKE_BUILD_TYPE=Debug` to get a debug build with AddressSanitizer and
+   UndefinedBehaviorSanitizer.
+5. Locates only the OpenCV components the program uses:
+   `find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)`.
+6. Builds the `search` executable from all project source files.
+7. Adds `include/` to the header search path.
+8. Links the executable with those OpenCV libraries.
+
+### Use of OpenCV
+
+OpenCV is used only to read images (`cv::imread`) and to compute SIFT
+descriptors (`cv::SIFT::detectAndCompute`), both inside
+`extract_sift_descriptors` in `src/image_features.cpp`. The descriptors are
+copied out of the `cv::Mat` before that function returns. Everything else,
+including descriptor storage, sampling, k-means, nearest-centroid assignment,
+and all distance computations, is implemented in this project.
 
 The source files are compiled together, so `main.cpp` can include the three
 public headers while the linker resolves their implementations from the
@@ -223,7 +241,8 @@ interface.
 - `ImageUnreadable`: OpenCV could not load the image.
 - `NoDescriptors`: the image loaded, but SIFT found no descriptors.
 
-`SiftExtractionResult` keeps the descriptor matrix and status together so the
+`SiftExtractionResult` keeps the descriptor matrix (a `DescriptorMatrix`, see
+the matrix module below) and status together so the
 caller cannot confuse an unreadable image with an image that simply contains no
 keypoints.
 
@@ -238,7 +257,8 @@ keypoints.
 3. Creates an OpenCV SIFT detector.
 4. Calls `detectAndCompute`.
 5. Returns `NoDescriptors` if no descriptor matrix was produced.
-6. Otherwise returns the `CV_32F` descriptor matrix and `Success`.
+6. Otherwise copies the `CV_32F` rows into a `DescriptorMatrix` and returns it
+   with `Success`.
 
 Each SIFT row is one 128-dimensional local descriptor.
 
@@ -255,13 +275,52 @@ This function:
 
 1. Rejects a non-positive maximum.
 2. Rejects an empty descriptor matrix.
-3. Returns a clone when the image already has at most `S` descriptors.
+3. Returns a copy when the image already has at most `S` descriptors.
 4. Creates row indices for larger matrices.
 5. Shuffles the indices using the caller's seeded `std::mt19937`.
 6. Copies the first `S` selected rows into a new matrix.
 
 The random generator is owned by `main.cpp`, so all training-image sampling is
 reproducible for a fixed `-seed`.
+
+## Matrix module
+
+[`include/matrix.hpp`](include/matrix.hpp) defines `Matrix<T>`, a dense
+row-major matrix with `rows`, `cols`, and a contiguous `std::vector<T> data`.
+`row(r)` returns a pointer to the first element of row `r`.
+`DescriptorMatrix` is `Matrix<float>` and holds SIFT descriptors or visual
+words, one 128-dimensional row each.
+
+## K-means module
+
+[`include/kmeans.hpp`](include/kmeans.hpp) and
+[`src/kmeans.cpp`](src/kmeans.cpp) implement the clustering used both for the
+visual vocabulary (on `float` SIFT descriptors) and for the IVFFlat/IVFPQ
+coarse clusters and PQ codebooks (on `double` BoVW vectors).
+
+```cpp
+template <typename T>
+KMeansResult<T> kmeans(const Matrix<T>& points, std::size_t clusters, int seed,
+                       int max_iterations = 100);
+```
+
+1. Rejects empty input, zero clusters, and more clusters than points.
+2. Initializes the centers with k-means++: the first center is a uniformly
+   random point, and every next center is a point chosen with probability
+   proportional to its squared distance from the nearest center chosen so far.
+3. Runs Lloyd's algorithm: each iteration moves every center to the mean of
+   its points (accumulated in `double`) and then reassigns every point to its
+   nearest center.
+4. Moves the center of an empty cluster onto the point that is farthest from
+   its own center.
+5. Stops when no point changes cluster, or after `max_iterations` iterations.
+6. Returns the centers, the assignment of every point, the number of
+   iterations, and whether it converged.
+
+All random choices use a `std::mt19937` seeded with `seed`, so results are
+reproducible. The returned assignments always refer to the returned centers.
+`nearest_center` and `squared_distance` are exposed for reuse; distance ties
+go to the lowest center index.
 
 ## Vocabulary module
 
@@ -270,14 +329,14 @@ reproducible for a fixed `-seed`.
 [`include/vocabulary.hpp`](include/vocabulary.hpp) exposes:
 
 ```cpp
-cv::Mat compute_visual_vocabulary(
-    const std::vector<cv::Mat>& training_descriptors,
+DescriptorMatrix compute_visual_vocabulary(
+    const std::vector<DescriptorMatrix>& training_descriptors,
     int vocab_size,
     int seed);
 
 std::vector<double> compute_image_bow_histogram(
-    const cv::Mat& descriptors,
-    const cv::Mat& vocabulary);
+    const DescriptorMatrix& descriptors,
+    const DescriptorMatrix& vocabulary);
 ```
 
 The first function produces the shared visual vocabulary. The second converts
@@ -294,15 +353,13 @@ The function:
 
 1. Validates that input matrices exist and `K` is positive.
 2. Finds a non-empty matrix to determine the descriptor dimension.
-3. Requires the reference and all non-empty matrices to be non-empty,
-   single-channel `CV_32F` matrices.
-4. Requires all non-empty matrices to have equal dimensions.
-5. Counts all sampled descriptor rows and rejects integer overflow.
-6. Rejects input with fewer than `K` descriptors.
-7. Concatenates all training descriptors into one OpenCV matrix.
-8. Sets OpenCV's random state from the supplied seed.
-9. Runs OpenCV k-means with k-means++ initialization.
-10. Returns the `K × 128` center matrix.
+3. Requires all non-empty matrices to have equal dimensions.
+4. Counts all sampled descriptor rows.
+5. Rejects input with fewer than `K` descriptors.
+6. Concatenates all training descriptors into one matrix.
+7. Runs the project's k-means (k-means++ initialization, at most 100 Lloyd
+   iterations) with the supplied seed.
+8. Returns the `K × 128` center matrix.
 
 The resulting centers are the visual words shared by every image in the
 evaluation set.
@@ -314,19 +371,18 @@ For one image, the function:
 1. Rejects an empty descriptor matrix with `std::invalid_argument`.
 2. Validates the vocabulary and descriptor dimensions.
 3. Creates a zero histogram with `K` bins.
-4. Uses a brute-force OpenCV L2 matcher to assign every descriptor to its
-   nearest vocabulary center.
-5. Validates each returned nearest-word index.
-6. Increments the selected visual-word bin.
-7. Divides every bin by the number of descriptors.
-8. Returns a normalized `std::vector<double>`.
+4. Assigns every descriptor to its nearest vocabulary center by Euclidean
+   distance with `nearest_center`.
+5. Increments the selected visual-word bin.
+6. Divides every bin by the number of descriptors.
+7. Returns a normalized `std::vector<double>`.
 
 For a non-empty image, the histogram values sum to one. Empty descriptors no
 longer produce an all-zero histogram: the function throws explicitly so callers
 cannot accidentally insert an invalid zero vector into a database or query
 collection. `main.cpp` already rejects failed extraction results before calling
-this function. The vocabulary must have positive dimensions and type `CV_32F`;
-descriptor matrices must also be `CV_32F` and have the same number of columns.
+this function. The vocabulary must not be empty, and descriptors must have
+the same number of columns as the vocabulary.
 
 ## Pipeline module
 
@@ -362,7 +418,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance, nearest-center lookup, the k-means used by IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, and `buildResult`, which reranks candidates and computes the metrics. Also defines the public `computeEuclideanDistance`. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance, nearest-center lookup, `clusterVectors`, which runs the shared k-means of the k-means module on BoVW vectors for IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, and `buildResult`, which reranks candidates and computes the metrics. Also defines the public `computeEuclideanDistance`. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
@@ -507,9 +563,13 @@ based on the actual index size rather than the nominal requested size.
 # Required Makefile entry point
 make
 
-# Equivalent direct CMake workflow
+# Equivalent direct CMake workflow (Release unless a build type is given)
 cmake -S . -B build
 cmake --build build -j
+
+# Debug build with sanitizers
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-debug -j
 ```
 
 ### Example
@@ -588,7 +648,7 @@ Implemented:
 - Dataset split validation and path construction
 - SIFT extraction
 - Reproducible descriptor sampling
-- Seeded k-means vocabulary training
+- Seeded k-means vocabulary training (own k-means++ and Lloyd implementation)
 - Normalized BoVW histogram construction
 - Robust handling of unreadable and descriptor-less images
 - Dynamic usable-MIRFlickr selection
@@ -643,7 +703,7 @@ The code expects:
 - HPatches sequences with `1.ppm` through `6.ppm`
 - MIRFlickr image files in the supplied directory
 - A split file with one sequence and subset per line
-- OpenCV with SIFT support
+- OpenCV 4.4 or newer, where SIFT is part of `features2d`
 - A Linux environment with a C++20 compiler
 
 For a fixed seed and unchanged input ordering, training descriptor sampling and
