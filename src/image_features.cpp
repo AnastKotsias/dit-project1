@@ -4,6 +4,8 @@
 #include <random>
 #include <algorithm>
 #include <stdexcept>
+#include <utility>
+#include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/imgcodecs.hpp>
 
@@ -47,13 +49,26 @@ SiftExtractionResult extract_sift_descriptors(
     if(descriptors.empty()) {
         return {{}, SiftExtractionStatus::NoDescriptors};
     }
+    // OpenCV SIFT always produces 32-bit float descriptors
+    if(descriptors.type() != CV_32F) {
+        throw std::runtime_error("SIFT returned descriptors that are not 32-bit floats");
+    }
 
-    return {descriptors, SiftExtractionStatus::Success};
+    // copy the descriptors out of the cv::Mat, so the rest of the program does not depend on OpenCV
+    DescriptorMatrix result(static_cast<std::size_t>(descriptors.rows),
+                            static_cast<std::size_t>(descriptors.cols));
+    for(std::size_t r = 0; r < result.rows; ++r) {
+        // rows are copied one by one, since a cv::Mat is not guaranteed to be continuous
+        const float* source = descriptors.ptr<float>(static_cast<int>(r));
+        std::copy(source, source + result.cols, result.row(r));
+    }
+
+    return {std::move(result), SiftExtractionStatus::Success};
 }
 
 // randomly keeps at most max_features descriptor rows, the S limit per training image
-cv::Mat sample_training_descriptors(
-    const cv::Mat& descriptors, int max_features, std::mt19937& rng) {
+DescriptorMatrix sample_training_descriptors(
+    const DescriptorMatrix& descriptors, int max_features, std::mt19937& rng) {
 
     // a non-positive limit would make the sample meaningless
     if(max_features <= 0) {
@@ -64,21 +79,23 @@ cv::Mat sample_training_descriptors(
         throw std::invalid_argument("descriptors must not be empty");
     }
 
+    const auto limit = static_cast<std::size_t>(max_features);
     // images with at most S descriptors keep all of them
-    if(descriptors.rows <= max_features) {
-        return descriptors.clone();
+    if(descriptors.rows <= limit) {
+        return descriptors;
     }
 
     // shuffle all row indices and take the first max_features, which samples without replacement
-    std::vector<int> indices(descriptors.rows);
+    std::vector<std::size_t> indices(descriptors.rows);
     std::iota(indices.begin(), indices.end(), 0);
     std::shuffle(indices.begin(), indices.end(), rng);
 
-    // output keeps the same column count and element type as the input
-    cv::Mat sampled(max_features, descriptors.cols, descriptors.type());
+    // output keeps the same column count as the input
+    DescriptorMatrix sampled(limit, descriptors.cols);
     // copy the selected rows so the result does not share memory with the input
-    for(int i = 0 ; i < max_features ; ++i) {
-        descriptors.row(indices[i]).copyTo(sampled.row(i));
+    for(std::size_t i = 0; i < limit; ++i) {
+        const float* source = descriptors.row(indices[i]);
+        std::copy(source, source + descriptors.cols, sampled.row(i));
     }
 
     return sampled;

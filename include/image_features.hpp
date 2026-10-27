@@ -3,7 +3,8 @@
 
 #include <filesystem>
 #include <random>
-#include <opencv2/core.hpp>
+
+#include "matrix.hpp"
 
 namespace image_search {
 
@@ -20,12 +21,13 @@ enum class SiftExtractionStatus {
 // bundles the extracted descriptors with the status of the extraction
 struct SiftExtractionResult {
     // one 128-dimensional float row per keypoint, empty unless status is Success
-    cv::Mat descriptors;
+    DescriptorMatrix descriptors;
     // tells whether extraction succeeded or why it failed
     SiftExtractionStatus status;
 };
 
 // reads an image in grayscale and extracts its SIFT descriptors
+// this is the only place where OpenCV is used
 SiftExtractionResult extract_sift_descriptors(
     const std::filesystem::path& image_path);
 
@@ -33,8 +35,8 @@ SiftExtractionResult extract_sift_descriptors(
 const char* sift_extraction_status_name(SiftExtractionStatus status);
 
 // sub-samples descriptors for training k-means using a shared prng state
-cv::Mat sample_training_descriptors(
-    const cv::Mat& descriptors,
+DescriptorMatrix sample_training_descriptors(
+    const DescriptorMatrix& descriptors,
     int max_features,
     std::mt19937& rng);
 

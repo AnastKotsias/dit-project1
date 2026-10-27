@@ -81,13 +81,13 @@ struct PreparedSet {
 
 // the trained vocabulary together with the dataset split it was trained on
 struct VocabularyData {
-    cv::Mat vocabulary;
+    DescriptorMatrix vocabulary;
     std::map<std::string, std::vector<std::string>> splits;
 };
 
 // converts the queries, the HPatches database images and D distractors into BoW vectors
 PreparedSet prepare_set(const EvaluationDataset& dataset,
-                        const cv::Mat& vocabulary,
+                        const DescriptorMatrix& vocabulary,
                         int distractor_count) {
     PreparedSet prepared;
     // every HPatches database image must be usable, otherwise its sequence would lose a relevant image

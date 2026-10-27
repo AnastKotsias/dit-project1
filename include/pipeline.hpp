@@ -6,17 +6,16 @@
 #include <string>
 #include <vector>
 
-#include <opencv2/core.hpp>
-
 #include "dataset.hpp"
 #include "image_features.hpp"
+#include "matrix.hpp"
 
 namespace image_search {
 
 // collects the sampled training descriptors together with a report of the images that failed
 struct TrainingDescriptorResult {
     // one matrix per successful image, holding at most S sampled descriptors
-    std::vector<cv::Mat> sampled_descriptors;
+    std::vector<DescriptorMatrix> sampled_descriptors;
     std::size_t successful_images = 0;
     std::size_t failed_images = 0;
     std::vector<std::filesystem::path> failed_paths;
@@ -49,7 +48,7 @@ struct BowVectorResult {
 // A non-zero limit stops after that many successful records; zero processes all.
 BowVectorResult extract_bow_vectors(
     const std::vector<ImageRecord>& records,
-    const cv::Mat& vocabulary,
+    const DescriptorMatrix& vocabulary,
     std::size_t successful_limit = 0);
 
 }  // namespace image_search

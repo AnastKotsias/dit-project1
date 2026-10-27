@@ -38,7 +38,7 @@ TrainingDescriptorResult extract_training_descriptors(
 // converts every record to its bag of visual words vector, skipping images that fail
 BowVectorResult extract_bow_vectors(
     const std::vector<ImageRecord>& records,
-    const cv::Mat& vocabulary,
+    const DescriptorMatrix& vocabulary,
     std::size_t successful_limit) {
     BowVectorResult result;
     // upper bound on the number of results, avoids reallocation

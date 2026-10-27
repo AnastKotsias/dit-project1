@@ -20,6 +20,7 @@ add_executable(search
     src/main.cpp
     src/image_features.cpp
     src/vocabulary.cpp
+    src/kmeans.cpp
     src/dataset.cpp
     src/pipeline.cpp
     src/search/common.cpp

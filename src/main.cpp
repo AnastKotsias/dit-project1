@@ -319,7 +319,7 @@ int main(int argc, char** argv) {
 
     // step 3, cluster the sampled descriptors into K visual words
     std::cout << "computing visual vocabulary with k=" << args.vocab << "...\n";
-    cv::Mat vocabulary;
+    image_search::DescriptorMatrix vocabulary;
     try {
         vocabulary = image_search::compute_visual_vocabulary(
             training_result.sampled_descriptors, args.vocab, args.seed);
