@@ -79,16 +79,7 @@ Clustering clusterVectors(const std::vector<Vector>& points, int requested, int 
 
 // Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
-    // debug-only sanity checks, the throws below also protect release builds
-    assert(!database.empty());
-    assert(query.size() == database.front().size());
-    // the query must have the same dimension K as the database vectors
-    if(query.size() != database.front().size())
-        throw std::invalid_argument("query vector has inconsistent dimensions");
-    // NaN or infinite values would make every distance meaningless
-    if(!std::all_of(query.begin(), query.end(),
-                    [](double value) { return std::isfinite(value); }))
-        throw std::invalid_argument("query vector contains non-finite values");
+    validateQuery(database, query);
 
     // candidates scored by their distance to the query
     std::vector<ScoredId> ranked;
@@ -104,13 +95,41 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
 
     // Select the top 10 among the candidates actually returned by the index.
     // Missing positions are non-relevant by definition.
-    std::sort(ranked.begin(), ranked.end());
-    const int limit = std::min(10, static_cast<int>(ranked.size()));
-    // identifiers of the top results in rank order
-    std::vector<std::string> top;
-    for(int i = 0; i < limit; ++i) {
-        top.push_back(ids[ranked[i].second]);
+    const std::size_t limit = std::min<std::size_t>(10, ranked.size());
+    std::partial_sort(ranked.begin(), ranked.begin() + limit, ranked.end());
+    std::vector<std::size_t> order;
+    for(std::size_t i = 0; i < limit; ++i) {
+        order.push_back(ranked[i].second);
     }
+    return buildRankedResult(ids, order, queryId, sequenceId, start);
+}
+
+// Checks that a query can be compared with the database vectors
+void validateQuery(const std::vector<Vector>& database, const Vector& query) {
+    // debug-only sanity checks, the throws below also protect release builds
+    assert(!database.empty());
+    assert(query.size() == database.front().size());
+    // the query must have the same dimension K as the database vectors
+    if(query.size() != database.front().size())
+        throw std::invalid_argument("query vector has inconsistent dimensions");
+    // NaN or infinite values would make every distance meaningless
+    if(!std::all_of(query.begin(), query.end(),
+                    [](double value) { return std::isfinite(value); }))
+        throw std::invalid_argument("query vector contains non-finite values");
+}
+
+// Finishes a query whose candidates are already in rank order and computes its metrics
+SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
+    // identifiers of the first 10 distinct valid candidates, in rank order
+    std::vector<std::string> top;
+    std::unordered_set<std::size_t> seen;
+    for(const auto index : ranked) {
+        if(top.size() == 10)
+            break;
+        if(index < ids.size() && seen.insert(index).second)
+            top.push_back(ids[index]);
+    }
+    const int limit = static_cast<int>(top.size());
 
     // Stop timing once the ranked top-10 result identifiers are available.
     // Ground-truth construction and metric calculation are intentionally

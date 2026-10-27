@@ -362,13 +362,17 @@ int main(int argc, char** argv) {
     // take the first D usable MIRFlickr images as distractors
     const auto distractors = image_search::extract_bow_vectors(
         evaluation_dataset.distractor_pool, vocabulary, args.d_mir);
-    // fewer than D means the pool ran out of usable images
+    // fewer than D means the pool ran out of usable images, in which case every usable
+    // image is kept and the actual number is reported
     const auto distractors_added = distractors.vectors.size();
     if(distractors_added < static_cast<std::size_t>(args.d_mir)) {
-        std::cerr << "error: ran out of MIRFlickr images before reaching -D="
-                  << args.d_mir << "\n";
-        return EXIT_FAILURE;
+        std::cerr << "warning: only " << distractors_added
+                  << " usable MIRFlickr images for -D=" << args.d_mir << " ("
+                  << distractors.failed_records.size()
+                  << " without SIFT descriptors), continuing with all of them\n";
     }
+    std::cout << "using " << distractors_added << " MIRFlickr distractors ("
+              << distractors.failed_records.size() << " skipped)\n";
 
     // final database is the HPatches vectors followed by the distractors
     std::vector<std::vector<double>> database_bows = hpatches_database.vectors;
@@ -475,6 +479,13 @@ int main(int argc, char** argv) {
         // step 7, write the rankings and metrics to the output file
         image_search::evaluateAndWriteResults(args.out_file, output_name, all_results);
         std::cout << "wrote search results to " << args.out_file << "\n";
+        // the output format has no field for it, but the experimental study must report this count
+        std::size_t short_results = 0;
+        for(const auto& result : all_results)
+            if(result.top_10_ids.size() < 10)
+                ++short_results;
+        std::cout << short_results << " of " << all_results.size()
+                  << " queries returned fewer than 10 results\n";
     } catch(const std::exception& error) {
         std::cerr << "error: search index failed: " << error.what() << "\n";
         return EXIT_FAILURE;

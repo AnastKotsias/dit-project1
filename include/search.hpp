@@ -85,7 +85,8 @@ public:
 
 };
 
-// inverted file index that stores product-quantized residuals and ranks candidates by approximate distance
+// inverted file index that stores product-quantized residuals and ranks candidates by their
+// asymmetric distance (ADC) to the codes, without reranking by exact distance
 class IVFPQSearch {
 private:
     struct Impl;
@@ -95,7 +96,7 @@ public:
     // Initialization of the IVFPQSearch class with database BoW vectors, their identifiers, and IVFPQ parameters
     IVFPQSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int subquantizers, int bits, int seed = 1);
     
-    // returns the approximate top 10 neighbours found among the index candidates, plus metrics
+    // returns the 10 candidates with the smallest ADC distance, plus metrics
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iostream>
 #include <iomanip>
 #include <map>
 #include <numeric>
@@ -40,6 +41,8 @@ struct Aggregate {
     double time_ms = 0.0;
     // number of queries added so far
     std::size_t count = 0;
+    // queries for which the index returned fewer than 10 results, reported by the assignment
+    std::size_t short_results = 0;
 
     // accumulates the metrics of one query
     void add(const SearchResult& result) {
@@ -48,6 +51,8 @@ struct Aggregate {
         ap10 += result.ap_10;
         time_ms += result.query_time_ms;
         ++count;
+        if(result.top_10_ids.size() < 10)
+            ++short_results;
     }
 
     // divides a running sum by the query count, giving 0 for an empty group
@@ -75,8 +80,10 @@ struct PreparedSet {
     std::vector<std::vector<double>> hpatches_database;
     // identifier of each database vector, aligned with hpatches_database
     std::vector<std::string> hpatches_ids;
-    // the distractor images that were actually used
+    // the distractor images that were actually used, fewer than D if the pool ran out
     std::vector<ImageRecord> distractors;
+    // MIRFlickr images skipped because they produced no usable descriptors
+    std::size_t failed_distractors = 0;
 };
 
 // the trained vocabulary together with the dataset split it was trained on
@@ -102,10 +109,11 @@ PreparedSet prepare_set(const EvaluationDataset& dataset,
     // take the first D usable MIRFlickr images, failed ones are replaced by the next in order
     const auto distractors = extract_bow_vectors(
         dataset.distractor_pool, vocabulary, static_cast<std::size_t>(distractor_count));
-    // the pool is too small if D usable images could not be found
-    if(distractors.vectors.size() != static_cast<std::size_t>(distractor_count)) {
-        throw std::runtime_error("not enough usable MIRFlickr images for D=" +
-                                 std::to_string(distractor_count));
+    // when the pool runs out, every usable image is kept and the actual number is reported
+    if(distractors.vectors.size() < static_cast<std::size_t>(distractor_count)) {
+        std::cerr << "warning: only " << distractors.vectors.size()
+                  << " usable MIRFlickr images for D=" << distractor_count << " ("
+                  << distractors.failed_records.size() << " without SIFT descriptors)\n";
     }
 
     // every query must be usable, otherwise it cannot be evaluated
@@ -123,11 +131,16 @@ PreparedSet prepare_set(const EvaluationDataset& dataset,
     prepared.hpatches_database = database.vectors;
     prepared.hpatches_ids = database.identifiers;
     // record which distractor files were used, pairing each with its identifier
+    // failed images are skipped, so the usable files are found by identifier rather than position
     prepared.distractors.reserve(distractors.vectors.size());
-    for(std::size_t i = 0; i < distractors.vectors.size(); ++i) {
-        prepared.distractors.push_back(
-            {dataset.distractor_pool[i].filepath, distractors.identifiers[i]});
+    std::size_t pool_index = 0;
+    for(const auto& identifier : distractors.identifiers) {
+        while(dataset.distractor_pool[pool_index].identifier != identifier)
+            ++pool_index;
+        prepared.distractors.push_back(dataset.distractor_pool[pool_index]);
+        ++pool_index;
     }
+    prepared.failed_distractors = distractors.failed_records.size();
     // a query's identifier is its sequence name
     for(const auto& query : dataset.queries)
         prepared.sequence_ids.push_back(query.identifier);
@@ -210,15 +223,19 @@ Summary summarize(const std::vector<SearchResult>& results) {
     return summary;
 }
 
-// writes one markdown table row per category
+// writes a markdown table with one row per category
 void write_summary(std::ofstream& output, const Summary& summary) {
+    output << "| Category | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) "
+              "| Queries with < 10 results |\n"
+              "|---|---:|---:|---:|---:|---:|\n";
     // formats the mean metrics of one category as a row
     const auto write_row = [&](const char* name, const Aggregate& aggregate) {
         output << "| " << name << " | "
                << aggregate.mean(aggregate.recall5) << " | "
                << aggregate.mean(aggregate.recall10) << " | "
                << aggregate.mean(aggregate.ap10) << " | "
-               << aggregate.mean(aggregate.time_ms) << " |\n";
+               << aggregate.mean(aggregate.time_ms) << " | "
+               << aggregate.short_results << "/" << aggregate.count << " |\n";
     };
     write_row("Overall", summary.overall);
     write_row("Illumination", summary.illumination);
@@ -319,7 +336,8 @@ void ExperimentRunner::run(const std::string& output_path) {
         throw std::runtime_error("could not open experiment output: " + output_path);
     output << std::fixed << std::setprecision(4);
     output << "# Image-search experiment\n\n";
-    output << "Validation tuning uses D=10000 and selects each approximate "
+    output << "Validation tuning uses D=10000 (" << validation.distractors.size()
+           << " usable MIRFlickr images) and selects each approximate "
               "method by maximum mAP@10.\n\n";
     output << "## Selected validation parameters\n\n"
               "| Method | Parameters |\n|---|---|\n";
@@ -348,8 +366,11 @@ void ExperimentRunner::run(const std::string& output_path) {
         const auto test = prepare_set(test_dataset, vocabulary_data.vocabulary,
                                       distractor_count);
         output << "\n## D = " << distractor_count << "\n\n";
-        output << "| Category | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) |\n"
-                  "|---|---:|---:|---:|---:|\n";
+        // the actual number differs from D only if MIRFlickr ran out of usable images
+        output << "Usable MIRFlickr distractors: " << test.distractors.size()
+               << " (" << test.failed_distractors
+               << " skipped without SIFT descriptors), database size: "
+               << test.hpatches_database.size() << "\n";
 
         // exact search is the baseline and needs no tuning
         const MethodConfig exact{"EXACT"};

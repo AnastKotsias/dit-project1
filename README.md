@@ -7,8 +7,11 @@ Bag-of-Visual-Words (BoVW) vectors.
 
 The code prepares the training vocabulary, database vectors, and query vectors,
 then searches them with exact search or one of four approximate indexes:
-LSH, Hypercube, IVFFlat, and IVFPQ. Every method reranks its candidate set by
-Euclidean distance, computes the retrieval metrics, and writes the result file.
+LSH, Hypercube, IVFFlat, and IVFPQ. Exact, LSH, Hypercube, and IVFFlat rank
+their candidate set by Euclidean distance; IVFPQ ranks its candidates by the
+asymmetric distance (ADC) to their product-quantized codes, as defined in the
+lecture. Every method then computes the retrieval metrics and writes the result
+file.
 
 ## Project structure
 
@@ -162,7 +165,11 @@ struct EvaluationDataset {
 
 The MIRFlickr pool is deliberately kept separate. The application must inspect
 descriptors and choose the first `D` usable images, because an image with no
-SIFT descriptors must be skipped and replaced by the next image.
+SIFT descriptors must be skipped and replaced by the next image. If the pool
+runs out before `D` usable images are found (possible only for `D=25000`, since
+MIRFlickr-25K has exactly 25000 images), every usable image is used and the
+actual number is reported. Images without
+descriptors are never represented by zero vectors.
 
 #### `get_training_image_paths`
 
@@ -357,8 +364,10 @@ The function:
 4. Counts all sampled descriptor rows.
 5. Rejects input with fewer than `K` descriptors.
 6. Concatenates all training descriptors into one matrix.
-7. Runs the project's k-means (k-means++ initialization, at most 100 Lloyd
-   iterations) with the supplied seed.
+7. Runs the project's k-means (k-means++ initialization, at most 50 Lloyd
+   iterations) with the supplied seed. The cap of 50 gets within 0.1% of the
+   fully converged clustering error on the training descriptors, which would
+   need 240-300 iterations.
 8. Returns the `K × 128` center matrix.
 
 The resulting centers are the visual words shared by every image in the
@@ -418,7 +427,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance, nearest-center lookup, `clusterVectors`, which runs the shared k-means of the k-means module on BoVW vectors for IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, and `buildResult`, which reranks candidates and computes the metrics. Also defines the public `computeEuclideanDistance`. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance, nearest-center lookup, `clusterVectors`, which runs the shared k-means of the k-means module on BoVW vectors for IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance`. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
@@ -526,7 +535,11 @@ The current `main` function performs these stages:
 Unreadable or descriptor-less training images generate warnings and are
 excluded. Invalid HPatches database images are also skipped. Query failures are
 fatal because queries cannot silently disappear from evaluation. If fewer than
-`D` usable MIRFlickr images exist, the program exits with an explicit error.
+`D` usable MIRFlickr images exist, the program prints a warning with the actual
+number and the number of skipped images, and continues with all usable images.
+After writing the result file it also prints how many queries returned fewer
+than ten results, since the output format has no field for that count but the
+experimental study must report it.
 
 The final prepared data currently consists of:
 
@@ -538,8 +551,9 @@ query_ids     : vector<string>
 ```
 
 The selected search method consumes these vectors after preparation. Approximate
-methods use their index-specific candidate set and exact Euclidean reranking;
-the exact method evaluates every database vector.
+methods use their index-specific candidate set, ranked by exact Euclidean
+distance for LSH, Hypercube, and IVFFlat and by ADC distance for IVFPQ; the
+exact method evaluates every database vector.
 
 ### Deferred IVF defaults
 
@@ -608,7 +622,9 @@ writes Markdown-ready aggregate tables:
 It tunes the approximate methods on validation with `D=10000`, selecting the
 configuration with the highest mAP@10, then evaluates Exact, LSH, Hypercube,
 IVFFlat, and IVFPQ on the test set for all four required distractor sizes.
-The report contains overall, illumination, and viewpoint aggregates. The
+The report contains overall, illumination, and viewpoint aggregates, the number
+of queries that returned fewer than ten results, and, for every `D`, the actual
+number of usable MIRFlickr distractors and the resulting database size. The
 validation grids focus on the principal quality/time parameters rather than
 performing an exhaustive search of every parameter.
 
@@ -663,11 +679,16 @@ Implemented search methods:
 - Hypercube search with projection vertices, Hamming-distance probes, and a
   maximum candidate limit
 - IVFFlat with k-means coarse centroids and `nprobe` lists
-- IVFPQ with IVF coarse lists and product-quantized sub-vectors
+- IVFPQ with IVF coarse lists and product-quantized residuals. A query builds
+  one `M × 2^nbits` lookup table per probed list and returns the ten stored
+  vectors with the smallest asymmetric distance (the sum of `M` table lookups),
+  without reranking by exact distance, so IVFPQ trades accuracy for speed
+  relative to IVFFlat. Codes are stored as one flat array of 16-bit indices.
 
 In single-run mode, all methods write the assignment's result file through
 `-o`. Exact search ranks the complete database. Approximate indexes rank only
-the candidates returned by their index; they do not fall back to exhaustive
+the candidates returned by their index (IVFPQ by ADC distance, the others by
+exact distance); they do not fall back to exhaustive
 database ranking when no candidates are returned. Consequently, an
 approximate result may contain fewer than ten entries, and missing positions
 are treated as non-relevant when computing the metrics.
@@ -681,7 +702,8 @@ non-relevant.
 
 Experiment mode writes a separate Markdown-ready report through `-o`, including
 the validation-selected parameters and aggregate test results for each
-required distractor size.
+required distractor size, with the actual number of usable distractors and the
+number of queries with fewer than ten results.
 
 ## Development configuration
 

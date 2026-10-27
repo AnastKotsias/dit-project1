@@ -36,7 +36,15 @@ struct Clustering {
 // the number of clusters is capped at the number of points
 Clustering clusterVectors(const std::vector<Vector>& points, int requested, int seed);
 
-// Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
+// Checks that the query has the database dimension and only finite values, throws otherwise
+void validateQuery(const std::vector<Vector>& database, const Vector& query);
+
+// Finishes a query whose candidates are already in rank order: keeps the first 10 distinct ones,
+// stops the timer that started at start and computes the metrics
+SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start);
+
+// Common result-building function used by Exact, LSH, Hypercube and IVFFlat search
+// ranks the candidates by exact euclidean distance to the query, then calls buildRankedResult
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start);
 
 // base class shared by all indexes that owns the database vectors and validates them
