@@ -32,7 +32,6 @@ int checkedCodeCount(int bits) {
 // queries are ranked by the asymmetric distance (ADC) to the stored codes,
 // so the full database vectors are not used at query time
 struct IVFPQSearch::Impl : DatabaseIndex {
-    int probes;             // Number of probes to perform in the IVFPQ search
     std::size_t subquantizers;  // Number of subquantizers (M)
     std::size_t width;          // Length of each subvector, the vector dimension divided by M
     std::vector<Vector> centers;                        // Coarse cluster centers obtained from k-means clustering
@@ -41,8 +40,8 @@ struct IVFPQSearch::Impl : DatabaseIndex {
     std::vector<std::uint16_t> codes;                   // codes[i * M + m] is the codebook entry of subvector m of vector i
 
     // trains the coarse clusters, the PQ codebooks and encodes the whole database
-    Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int probeCount, int subCount, int bits, int seed)
-            : DatabaseIndex{db, names}, probes(probeCount) {
+    Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int subCount, int bits, int seed)
+            : DatabaseIndex{db, names} {
         const int codeCount = checkedCodeCount(bits);
         // Check for valid subquantizer count and ensure it divides the vector dimension
         if(subCount <= 0)
@@ -105,7 +104,7 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
     // returns the database indices of the 10 smallest ADC distances among the probed lists, nearest first
     // examined receives the number of ADC distances computed
-    std::vector<std::size_t> candidates(const Vector& query, std::size_t& examined) const {
+    std::vector<std::size_t> candidates(const Vector& query, int probes, std::size_t& examined) const {
         const auto selected = nearestCenters(query, centers, probes);   // Find the nearest coarse cluster centers to the query vector
         const std::size_t codebookSize = codebooks.front().rows;
         // stored vectors with their ADC distance to the query
@@ -148,7 +147,14 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
 // IVFPQSearch constructor
 IVFPQSearch::IVFPQSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int clusters, int probes, int subquantizers, int bits, int seed)
-    : impl(std::make_shared<Impl>(db, ids, clusters, probes, subquantizers, bits, seed)) {}
+    : impl(std::make_shared<Impl>(db, ids, clusters, subquantizers, bits, seed)), probes(probes) {}
+
+// copies the handle, so the trained index is shared rather than rebuilt
+IVFPQSearch IVFPQSearch::withProbes(int probe_count) const {
+    IVFPQSearch copy = *this;
+    copy.probes = probe_count;
+    return copy;
+}
 
 // IVFPQSearch search function
 SearchResult IVFPQSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
@@ -156,7 +162,7 @@ SearchResult IVFPQSearch::search(const Vector& query, const std::string& queryId
     // checked first, since the lookup tables index the query by the database dimension
     validateQuery(impl->database, query);
     std::size_t examined = 0;
-    const auto ranked = impl->candidates(query, examined);
+    const auto ranked = impl->candidates(query, probes, examined);
     return buildRankedResult(impl->ids, ranked, examined, queryId, sequenceId, start);
 }
 

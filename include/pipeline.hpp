@@ -51,6 +51,25 @@ BowVectorResult extract_bow_vectors(
     const DescriptorMatrix& vocabulary,
     std::size_t successful_limit = 0);
 
+// bag of visual words vectors of the same images under several vocabularies
+struct MultiBowVectorResult {
+    // vectors[v][i] is the histogram of the i-th successful image under vocabulary v
+    std::vector<std::vector<std::vector<double>>> vectors;
+    // identifier of each successful image
+    std::vector<std::string> identifiers;
+    // position in the input records of each successful image
+    std::vector<std::size_t> record_indices;
+    // images skipped because their descriptors could not be extracted
+    std::vector<FailedImageRecord> failed_records;
+};
+
+// like extract_bow_vectors, but builds one histogram per vocabulary from a single SIFT extraction
+// per image, so comparing vocabulary sizes does not repeat the extraction
+MultiBowVectorResult extract_bow_vector_sets(
+    const std::vector<ImageRecord>& records,
+    const std::vector<DescriptorMatrix>& vocabularies,
+    std::size_t successful_limit = 0);
+
 }  // namespace image_search
 
 #endif

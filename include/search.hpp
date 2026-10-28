@@ -78,10 +78,15 @@ class IVFFlatSearch {
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;
+    // number of nearest clusters searched per query, kept outside Impl since it does not affect training
+    int probes;
 
 public:
     // Initialization of the IVFFlatSearch class with database BoW vectors, their identifiers, and IVF parameters
     IVFFlatSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int seed = 1);
+
+    // returns a copy that shares the trained index but searches the given number of clusters
+    IVFFlatSearch withProbes(int probe_count) const;
     
     // returns the approximate top 10 neighbours found among the index candidates, plus metrics
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
@@ -94,10 +99,15 @@ class IVFPQSearch {
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;
+    // number of nearest clusters searched per query, kept outside Impl since it does not affect training
+    int probes;
 
 public:
     // Initialization of the IVFPQSearch class with database BoW vectors, their identifiers, and IVFPQ parameters
     IVFPQSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int subquantizers, int bits, int seed = 1);
+
+    // returns a copy that shares the trained index but searches the given number of clusters
+    IVFPQSearch withProbes(int probe_count) const;
     
     // returns the 10 candidates with the smallest ADC distance, plus metrics
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;

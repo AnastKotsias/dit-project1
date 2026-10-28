@@ -159,8 +159,13 @@ Args parse_args(int argc, char** argv) {
     }
 
     // validating required arguments
-    if(args.hp_path.empty() || args.mir_path.empty() || args.split_file.empty() || args.out_file.empty() || args.vocab == 0) {
+    if(args.hp_path.empty() || args.mir_path.empty() || args.split_file.empty() || args.out_file.empty()) {
         std::cerr << "error: missing required arguments (-hp, -mir, -split, -o, -vocab)\n";
+        std::exit(EXIT_FAILURE);
+    }
+    // experiment mode without -vocab compares several vocabulary sizes, a single run needs one
+    if(!args.experiment && !parsed_options.count("-vocab")) {
+        std::cerr << "error: missing required argument -vocab\n";
         std::exit(EXIT_FAILURE);
     }
     if(args.method.empty() && !args.experiment) {
@@ -200,7 +205,7 @@ Args parse_args(int argc, char** argv) {
     }
 
     // validating numeric ranges and set types
-    if(args.vocab <= 0 || args.s_max <= 0 || args.d_mir <= 0) {
+    if((parsed_options.count("-vocab") && args.vocab <= 0) || args.s_max <= 0 || args.d_mir <= 0) {
         std::cerr << "error: -vocab, -S, and -D must be strictly positive\n";
         std::exit(EXIT_FAILURE);
     }

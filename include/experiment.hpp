@@ -6,6 +6,7 @@
 namespace image_search {
 
 // runs the full experimental study: vocabulary training, parameter tuning on validation and evaluation on test
+// the SIFT descriptors of every image are extracted once and encoded with every vocabulary
 class ExperimentRunner {
 public:
     // stores the dataset locations and the vocabulary and sampling settings, without doing any work yet
@@ -23,7 +24,7 @@ private:
     std::string mir_path_;
     // file assigning each sequence to train, validation or test
     std::string split_file_;
-    // number K of k-means centroids
+    // number K of k-means centroids, or 0 to compare the vocabulary sizes 128, 256, 512 and 1024
     int vocabulary_size_;
     // limit S of SIFT descriptors sampled per training image
     int max_training_descriptors_;

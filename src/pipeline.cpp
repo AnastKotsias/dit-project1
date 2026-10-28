@@ -6,7 +6,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
+#include <stdexcept>
 #include <utility>
+
+#ifdef _OPENMP
+#include <cstdlib>
+#include <omp.h>
+#endif
 
 namespace image_search {
 // helpers below are private to this translation unit
@@ -14,6 +20,21 @@ namespace {
 
 // images processed in parallel at a time, their results are consumed in input order after each batch
 constexpr std::size_t kBatchSize = 64;
+
+#ifdef _OPENMP
+// default number of preprocessing threads when OMP_NUM_THREADS is not set
+// every concurrent SIFT extraction of a large HPatches image needs about 0.65 GB, and OpenCV's SIFT
+// already uses several cores per image, so more threads mostly add memory: measured on 12 cores,
+// 4 threads give 89% of the 12-thread speedup with half the peak memory (4.5 GB instead of 8.6 GB)
+constexpr int kDefaultPreprocessingThreads = 4;
+
+// threads used for preprocessing, OMP_NUM_THREADS when the user set it, otherwise the capped default
+int preprocessing_threads() {
+    if(std::getenv("OMP_NUM_THREADS") != nullptr)
+        return omp_get_max_threads();
+    return std::min(kDefaultPreprocessingThreads, omp_get_max_threads());
+}
+#endif
 
 // runs work(i) for every i in [begin, end), in parallel when the program is built with OpenMP
 // only image preprocessing runs here, the search itself is always single-threaded
@@ -24,7 +45,7 @@ void parallel_for_images(std::size_t begin, std::size_t end, const Work& work) {
     std::vector<std::exception_ptr> errors(end - begin);
 #ifdef _OPENMP
     // dynamic scheduling, since images differ in size and number of keypoints
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(preprocessing_threads())
 #endif
     for(std::ptrdiff_t offset = 0; offset < count; ++offset) {
         try {
@@ -39,11 +60,11 @@ void parallel_for_images(std::size_t begin, std::size_t end, const Work& work) {
     }
 }
 
-// BoW vector of one image, or the reason it could not be computed
-struct ImageVector {
+// BoW vectors of one image, one per vocabulary, or the reason they could not be computed
+struct ImageVectors {
     SiftExtractionStatus status = SiftExtractionStatus::Success;
     // empty if the image failed
-    std::vector<double> histogram;
+    std::vector<std::vector<double>> histograms;
 };
 
 }  // namespace
@@ -93,25 +114,41 @@ BowVectorResult extract_bow_vectors(
     const std::vector<ImageRecord>& records,
     const DescriptorMatrix& vocabulary,
     std::size_t successful_limit) {
-    BowVectorResult result;
+    auto sets = extract_bow_vector_sets(records, {vocabulary}, successful_limit);
+    return {std::move(sets.vectors.front()), std::move(sets.identifiers),
+            std::move(sets.failed_records)};
+}
+
+// converts every record to one bag of visual words vector per vocabulary, skipping images that fail
+MultiBowVectorResult extract_bow_vector_sets(
+    const std::vector<ImageRecord>& records,
+    const std::vector<DescriptorMatrix>& vocabularies,
+    std::size_t successful_limit) {
+    if(vocabularies.empty()) {
+        throw std::invalid_argument("at least one vocabulary is required");
+    }
+    MultiBowVectorResult result;
+    result.vectors.resize(vocabularies.size());
     // upper bound on the number of results, avoids reallocation
-    result.vectors.reserve(records.size());
+    for(auto& vectors : result.vectors)
+        vectors.reserve(records.size());
     result.identifiers.reserve(records.size());
+    result.record_indices.reserve(records.size());
 
     std::size_t begin = 0;
     while(begin < records.size()) {
         // stop once enough images succeeded, which allows taking the first D distractors
-        if(successful_limit != 0 && result.vectors.size() >= successful_limit) {
+        if(successful_limit != 0 && result.identifiers.size() >= successful_limit) {
             break;
         }
         // with a limit, a batch never exceeds the number of images still needed, so no work is wasted
         std::size_t batch = kBatchSize;
         if(successful_limit != 0)
-            batch = std::min(batch, successful_limit - result.vectors.size());
+            batch = std::min(batch, successful_limit - result.identifiers.size());
         const std::size_t end = std::min(begin + batch, records.size());
 
-        // extract the SIFT descriptors and build the histogram of every image of the batch in parallel
-        std::vector<ImageVector> computed(end - begin);
+        // extract the SIFT descriptors and build the histograms of every image of the batch in parallel
+        std::vector<ImageVectors> computed(end - begin);
         parallel_for_images(begin, end, [&](std::size_t i) {
             const auto extraction = extract_sift_descriptors(
                 std::filesystem::path(records[i].filepath));
@@ -119,8 +156,10 @@ BowVectorResult extract_bow_vectors(
             image.status = extraction.status;
             if(extraction.status == SiftExtractionStatus::Success &&
                !extraction.descriptors.empty()) {
-                // map the descriptors onto the vocabulary to get the image's histogram
-                image.histogram = compute_image_bow_histogram(extraction.descriptors, vocabulary);
+                // map the descriptors onto every vocabulary to get the image's histograms
+                for(const auto& vocabulary : vocabularies)
+                    image.histograms.push_back(
+                        compute_image_bow_histogram(extraction.descriptors, vocabulary));
             }
         });
 
@@ -128,13 +167,15 @@ BowVectorResult extract_bow_vectors(
         for(std::size_t i = begin; i < end; ++i) {
             auto& image = computed[i - begin];
             // failed images are recorded and skipped, so a replacement is taken from the next record
-            if(image.histogram.empty()) {
+            if(image.histograms.empty()) {
                 result.failed_records.push_back({records[i], image.status});
                 continue;
             }
-            result.vectors.push_back(std::move(image.histogram));
-            // keep the identifier aligned with the vector just added
+            for(std::size_t v = 0; v < vocabularies.size(); ++v)
+                result.vectors[v].push_back(std::move(image.histograms[v]));
+            // keep the identifier and position aligned with the vectors just added
             result.identifiers.push_back(records[i].identifier);
+            result.record_indices.push_back(i);
         }
         begin = end;
     }

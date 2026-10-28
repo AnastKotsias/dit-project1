@@ -6,11 +6,14 @@
 #include "vocabulary.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
 #include <map>
+#include <optional>
+#include <ostream>
 #include <sstream>
 #include <random>
 #include <stdexcept>
@@ -20,6 +23,15 @@
 namespace image_search {
 // helpers below are private to this translation unit
 namespace {
+
+// vocabulary sizes compared when experiment mode is run without -vocab
+constexpr std::array<int, 4> kVocabularySizes = {128, 256, 512, 1024};
+// number of MIRFlickr distractors used to tune the methods on the validation set
+constexpr int kValidationDistractors = 10000;
+// database sizes D evaluated on the test set
+constexpr std::array<int, 4> kTestDistractors = {1000, 5000, 10000, 25000};
+// approximate methods, tuned on validation and evaluated on test
+constexpr std::array<const char*, 4> kApproximateMethods = {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"};
 
 // one candidate parameter setting of a search method
 // the meaning of the numbered fields depends on the method, see search_all
@@ -71,7 +83,15 @@ struct Summary {
     Aggregate viewpoint;
 };
 
-// all vectors of one evaluation set, ready to be indexed and queried
+// BoW vectors of the HPatches images of one evaluation set, under every vocabulary
+struct EncodedSet {
+    MultiBowVectorResult queries;
+    MultiBowVectorResult database;
+    // sequence name of each query, used to decide which database images are relevant
+    std::vector<std::string> sequence_ids;
+};
+
+// all vectors of one evaluation set under one vocabulary, ready to be indexed and queried
 struct PreparedSet {
     // BoW vector of each query image
     std::vector<std::vector<double>> queries;
@@ -83,91 +103,93 @@ struct PreparedSet {
     std::vector<std::vector<double>> hpatches_database;
     // identifier of each database vector, aligned with hpatches_database
     std::vector<std::string> hpatches_ids;
-    // the distractor images that were actually used, fewer than D if the pool ran out
-    std::vector<ImageRecord> distractors;
+    // number of distractors actually used, fewer than D if the pool ran out
+    std::size_t distractor_count = 0;
     // MIRFlickr images skipped because they produced no usable descriptors
     std::size_t failed_distractors = 0;
 };
 
-// the trained vocabulary together with the dataset split it was trained on
-struct VocabularyData {
-    DescriptorMatrix vocabulary;
-    std::map<std::string, std::vector<std::string>> splits;
-};
-
-// converts the queries, the HPatches database images and D distractors into BoW vectors
-PreparedSet prepare_set(const EvaluationDataset& dataset,
-                        const DescriptorMatrix& vocabulary,
-                        int distractor_count) {
-    PreparedSet prepared;
+// encodes the queries and HPatches database images of one set, every one of which must be usable
+EncodedSet encode_set(const EvaluationDataset& dataset,
+                      const std::vector<DescriptorMatrix>& vocabularies) {
+    EncodedSet encoded;
     // every HPatches database image must be usable, otherwise its sequence would lose a relevant image
-    const auto database = extract_bow_vectors(dataset.database, vocabulary);
-    if(!database.failed_records.empty()) {
+    encoded.database = extract_bow_vector_sets(dataset.database, vocabularies);
+    if(!encoded.database.failed_records.empty()) {
+        const auto& failed = encoded.database.failed_records.front();
         throw std::runtime_error("an HPatches database image failed descriptor extraction: " +
-                                 database.failed_records.front().record.filepath +
-                                 " (" + sift_extraction_status_name(
-                                     database.failed_records.front().status) + ")");
+                                 failed.record.filepath + " (" +
+                                 sift_extraction_status_name(failed.status) + ")");
     }
-
-    // take the first D usable MIRFlickr images, failed ones are replaced by the next in order
-    const auto distractors = extract_bow_vectors(
-        dataset.distractor_pool, vocabulary, static_cast<std::size_t>(distractor_count));
-    // when the pool runs out, every usable image is kept and the actual number is reported
-    if(distractors.vectors.size() < static_cast<std::size_t>(distractor_count)) {
-        std::cerr << "warning: only " << distractors.vectors.size()
-                  << " usable MIRFlickr images for D=" << distractor_count << " ("
-                  << distractors.failed_records.size() << " without SIFT descriptors)\n";
-    }
-
     // every query must be usable, otherwise it cannot be evaluated
-    const auto queries = extract_bow_vectors(dataset.queries, vocabulary);
-    if(!queries.failed_records.empty()) {
+    encoded.queries = extract_bow_vector_sets(dataset.queries, vocabularies);
+    if(!encoded.queries.failed_records.empty()) {
+        const auto& failed = encoded.queries.failed_records.front();
         throw std::runtime_error("a query image failed descriptor extraction: " +
-                                 queries.failed_records.front().record.filepath +
-                                 " (" + sift_extraction_status_name(
-                                     queries.failed_records.front().status) + ")");
+                                 failed.record.filepath + " (" +
+                                 sift_extraction_status_name(failed.status) + ")");
     }
-
-    // copy the query and HPatches database data into the prepared set
-    prepared.queries = queries.vectors;
-    prepared.query_ids = queries.identifiers;
-    prepared.hpatches_database = database.vectors;
-    prepared.hpatches_ids = database.identifiers;
-    // record which distractor files were used, pairing each with its identifier
-    // failed images are skipped, so the usable files are found by identifier rather than position
-    prepared.distractors.reserve(distractors.vectors.size());
-    std::size_t pool_index = 0;
-    for(const auto& identifier : distractors.identifiers) {
-        while(dataset.distractor_pool[pool_index].identifier != identifier)
-            ++pool_index;
-        prepared.distractors.push_back(dataset.distractor_pool[pool_index]);
-        ++pool_index;
-    }
-    prepared.failed_distractors = distractors.failed_records.size();
     // a query's identifier is its sequence name
     for(const auto& query : dataset.queries)
-        prepared.sequence_ids.push_back(query.identifier);
+        encoded.sequence_ids.push_back(query.identifier);
+    return encoded;
+}
+
+// assembles the set under vocabulary v: its HPatches database images followed by the first D usable
+// MIRFlickr images of the shared pool, or all usable ones when the pool has fewer
+PreparedSet prepare_set(const EncodedSet& set, const MultiBowVectorResult& pool,
+                        std::size_t vocabulary, int distractor_count) {
+    PreparedSet prepared;
+    prepared.queries = set.queries.vectors[vocabulary];
+    prepared.query_ids = set.queries.identifiers;
+    prepared.sequence_ids = set.sequence_ids;
+    prepared.hpatches_database = set.database.vectors[vocabulary];
+    prepared.hpatches_ids = set.database.identifiers;
+
+    const auto requested = static_cast<std::size_t>(distractor_count);
+    const std::size_t used = std::min(requested, pool.identifiers.size());
+    prepared.distractor_count = used;
+    if(used < requested) {
+        // the pool ran out, so every image was scanned and every failure counts,
+        // and all usable images are kept
+        prepared.failed_distractors = pool.failed_records.size();
+        std::cerr << "warning: only " << used << " usable MIRFlickr images for D="
+                  << distractor_count << " (" << prepared.failed_distractors
+                  << " without SIFT descriptors)\n";
+    } else {
+        // only the failures before the last used image were skipped to reach D
+        prepared.failed_distractors = used == 0 ? 0 : pool.record_indices[used - 1] + 1 - used;
+    }
 
     // append the distractors so the final database holds HPatches images plus D distractors
-    prepared.hpatches_database.insert(prepared.hpatches_database.end(),
-                                      distractors.vectors.begin(),
-                                      distractors.vectors.end());
-    prepared.hpatches_ids.insert(prepared.hpatches_ids.end(),
-                                 distractors.identifiers.begin(),
-                                 distractors.identifiers.end());
+    const auto& pool_vectors = pool.vectors[vocabulary];
+    prepared.hpatches_database.insert(prepared.hpatches_database.end(), pool_vectors.begin(),
+                                      pool_vectors.begin() + static_cast<std::ptrdiff_t>(used));
+    prepared.hpatches_ids.insert(prepared.hpatches_ids.end(), pool.identifiers.begin(),
+                                 pool.identifiers.begin() + static_cast<std::ptrdiff_t>(used));
     return prepared;
 }
 
-// builds the index described by config and runs every query of the set against it
+// IVF indexes trained on one prepared set and reused across nprobe values, since nprobe only
+// changes the search and not the training; a cache must only be used with the set it was built on
+struct IndexCache {
+    std::optional<IVFFlatSearch> ivfflat;
+    int ivfflat_clusters = 0;
+    std::optional<IVFPQSearch> ivfpq;
+    MethodConfig ivfpq_config;
+};
+
+// builds the index described by config, or reuses a cached IVF index, and runs every query of the set
 // field usage: LSH (k, L, w), HYPERCUBE (kproj, M, w, probes), IVFFLAT (clusters, probes), IVFPQ (clusters, probes, M, nbits)
 std::vector<SearchResult> search_all(const MethodConfig& config,
                                      const PreparedSet& data,
-                                     int seed) {
+                                     int seed, IndexCache& cache) {
     std::vector<SearchResult> results;
     results.reserve(data.queries.size());
 
     // runs all queries on any index type, since every class exposes the same search method
-    auto search = [&](auto& index) {
+    // a forwarding reference accepts both named indexes and the copies made by withProbes
+    auto search = [&](auto&& index) {
         for(std::size_t i = 0; i < data.queries.size(); ++i)
             results.push_back(index.search(data.queries[i], data.query_ids[i],
                                            data.sequence_ids[i]));
@@ -187,14 +209,24 @@ std::vector<SearchResult> search_all(const MethodConfig& config,
                               config.second, config.fourth, seed);
         search(index);
     } else if(config.method == "IVFFLAT") {
-        IVFFlatSearch index(data.hpatches_database, data.hpatches_ids,
-                            config.first, config.second, seed);
-        search(index);
+        // train only if no index with the same number of clusters exists yet
+        if(!cache.ivfflat || cache.ivfflat_clusters != config.first) {
+            cache.ivfflat.emplace(data.hpatches_database, data.hpatches_ids,
+                                  config.first, config.second, seed);
+            cache.ivfflat_clusters = config.first;
+        }
+        search(cache.ivfflat->withProbes(config.second));
     } else if(config.method == "IVFPQ") {
-        IVFPQSearch index(data.hpatches_database, data.hpatches_ids,
-                          config.first, config.second, config.third,
-                          config.fourth, seed);
-        search(index);
+        // train only if no index with the same clusters, M and nbits exists yet
+        const auto& cached = cache.ivfpq_config;
+        if(!cache.ivfpq || cached.first != config.first || cached.third != config.third ||
+           cached.fourth != config.fourth) {
+            cache.ivfpq.emplace(data.hpatches_database, data.hpatches_ids,
+                                config.first, config.second, config.third,
+                                config.fourth, seed);
+            cache.ivfpq_config = config;
+        }
+        search(cache.ivfpq->withProbes(config.second));
     } else {
         // a misspelled method name is a programming error
         throw std::invalid_argument("unknown experiment method " + config.method);
@@ -217,7 +249,7 @@ Summary summarize(const std::vector<SearchResult>& results) {
 }
 
 // writes a markdown table with one row per category
-void write_summary(std::ofstream& output, const Summary& summary) {
+void write_summary(std::ostream& output, const Summary& summary) {
     output << "| Category | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) "
               "| Mean candidates | Queries with < 10 results |\n"
               "|---|---:|---:|---:|---:|---:|---:|\n";
@@ -290,20 +322,22 @@ struct ValidationRow {
 // with the 23 validation queries, one query's AP changing by 0.23 already moves mAP@10 by 0.01
 constexpr double kMapTolerance = 0.01;
 
-// evaluates every configuration on the validation set
+// evaluates every configuration on the validation set, training each IVF index only once
 std::vector<ValidationRow> evaluate_configs(const std::vector<MethodConfig>& configs,
                                             const PreparedSet& data, int seed) {
     std::vector<ValidationRow> rows;
     rows.reserve(configs.size());
+    IndexCache cache;
     for(const auto& config : configs)
-        rows.push_back({config, summarize(search_all(config, data, seed)).overall});
+        rows.push_back({config, summarize(search_all(config, data, seed, cache)).overall});
     return rows;
 }
 
-// returns the position of the selected row: among the rows within kMapTolerance of the best mAP@10,
-// the one with the fewest mean candidates, keeping the first in grid order on ties
-// the cost is a candidate count rather than the measured time, so the choice is reproducible
-std::size_t select_config(const std::vector<ValidationRow>& rows) {
+// returns the position of the row with the lowest cost among the rows within kMapTolerance of the
+// best mAP@10, keeping the first in order on ties
+// the cost is deterministic rather than a measured time, so the choice is reproducible
+template <typename Cost>
+std::size_t select_row(const std::vector<ValidationRow>& rows, const Cost& cost) {
     if(rows.empty())
         throw std::invalid_argument("no validation configurations to select from");
     double best_map = 0.0;
@@ -316,16 +350,21 @@ std::size_t select_config(const std::vector<ValidationRow>& rows) {
         // the small slack keeps rows exactly at the tolerance despite rounding
         if(overall.mean(overall.ap10) < best_map - kMapTolerance - 1e-12)
             continue;
-        if(selected == rows.size() ||
-           overall.mean(overall.candidates) <
-               rows[selected].overall.mean(rows[selected].overall.candidates))
+        if(selected == rows.size() || cost(rows[i]) < cost(rows[selected]))
             selected = i;
     }
     return selected;
 }
 
+// selects a method configuration, the cost being the mean number of candidates per query
+std::size_t select_config(const std::vector<ValidationRow>& rows) {
+    return select_row(rows, [](const ValidationRow& row) {
+        return row.overall.mean(row.overall.candidates);
+    });
+}
+
 // writes the validation results of one method, marking the selected configuration
-void write_validation_table(std::ofstream& output, const std::vector<ValidationRow>& rows,
+void write_validation_table(std::ostream& output, const std::vector<ValidationRow>& rows,
                             std::size_t selected) {
     output << "| Parameters | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) "
               "| Mean candidates | Queries with < 10 results | Selected |\n"
@@ -344,6 +383,78 @@ void write_validation_table(std::ofstream& output, const std::vector<ValidationR
     }
 }
 
+// tunes every approximate method on validation and evaluates all methods on test for one vocabulary,
+// writing the section of the report, and returns the exact-search validation metrics of the vocabulary
+Aggregate study_vocabulary(std::ostream& output, int vocabulary_size, std::size_t vocabulary,
+                           const EncodedSet& validation_set, const EncodedSet& test_set,
+                           const MultiBowVectorResult& pool, int seed) {
+    output << "\n## K = " << vocabulary_size << "\n\n";
+
+    // tune each approximate method on the validation set
+    const auto validation = prepare_set(validation_set, pool, vocabulary, kValidationDistractors);
+    // exact search on validation is the reference the approximate methods are compared against
+    const auto exact_validation = evaluate_configs({MethodConfig{"EXACT"}}, validation, seed);
+    // validation results and selected configuration of each approximate method
+    std::map<std::string, std::vector<ValidationRow>> validation_rows;
+    std::map<std::string, std::size_t> selected_row;
+    for(const auto& method : kApproximateMethods) {
+        // keep only the grid entries of the current method
+        std::vector<MethodConfig> candidates;
+        for(const auto& config : validation_configs(validation.hpatches_database.size()))
+            if(config.method == method)
+                candidates.push_back(config);
+        std::cout << "K=" << vocabulary_size << ": tuning " << method << " on "
+                  << candidates.size() << " validation configurations...\n";
+        validation_rows[method] = evaluate_configs(candidates, validation, seed);
+        selected_row[method] = select_config(validation_rows[method]);
+    }
+
+    output << "### Selected validation parameters\n\n"
+              "| Method | Parameters | Validation mAP@10 | Mean candidates |\n"
+              "|---|---|---:|---:|\n";
+    for(const auto& method : kApproximateMethods) {
+        const auto& row = validation_rows[method][selected_row[method]];
+        output << "| " << method << " | " << describe(row.config) << " | "
+               << row.overall.mean(row.overall.ap10) << " | " << std::setprecision(1)
+               << row.overall.mean(row.overall.candidates) << std::setprecision(4) << " |\n";
+    }
+
+    output << "\n### Validation results\n\n"
+           << "Database: " << validation.hpatches_database.size() << " vectors ("
+           << validation.distractor_count << " MIRFlickr distractors).\n\n";
+    output << "#### EXACT (reference)\n\n";
+    write_validation_table(output, exact_validation, exact_validation.size());
+    for(const auto& method : kApproximateMethods) {
+        output << "\n#### " << method << "\n\n";
+        write_validation_table(output, validation_rows[method], selected_row[method]);
+    }
+
+    // evaluate on the test set for each database size D, reusing the tuned parameters
+    output << "\n### Test results\n";
+    for(const int distractor_count : kTestDistractors) {
+        std::cout << "K=" << vocabulary_size << ": testing D=" << distractor_count << "...\n";
+        const auto test = prepare_set(test_set, pool, vocabulary, distractor_count);
+        output << "\n#### D = " << distractor_count << "\n\n";
+        // the actual number differs from D only if MIRFlickr ran out of usable images
+        output << "Usable MIRFlickr distractors: " << test.distractor_count
+               << " (" << test.failed_distractors
+               << " skipped without SIFT descriptors), database size: "
+               << test.hpatches_database.size() << "\n";
+
+        IndexCache cache;
+        // exact search is the baseline and needs no tuning
+        output << "\n##### EXACT\n\n";
+        write_summary(output, summarize(search_all(MethodConfig{"EXACT"}, test, seed, cache)));
+        // evaluate each approximate method with its validation-selected parameters
+        for(const auto& method : kApproximateMethods) {
+            const auto& config = validation_rows[method][selected_row[method]].config;
+            output << "\n##### " << method << "\n\n";
+            write_summary(output, summarize(search_all(config, test, seed, cache)));
+        }
+    }
+    return exact_validation.front().overall;
+}
+
 }  // namespace
 
 // stores the settings, moving the strings to avoid copies
@@ -355,109 +466,98 @@ ExperimentRunner::ExperimentRunner(std::string hp_path, std::string mir_path,
       max_training_descriptors_(max_training_descriptors), seed_(seed) {}
 
 void ExperimentRunner::run(const std::string& output_path) {
+    // a single vocabulary if -vocab was given, otherwise the vocabulary sizes are compared
+    std::vector<int> vocabulary_sizes;
+    if(vocabulary_size_ > 0)
+        vocabulary_sizes.push_back(vocabulary_size_);
+    else
+        vocabulary_sizes.assign(kVocabularySizes.begin(), kVocabularySizes.end());
     // IVFPQ uses M = 16 subquantizers, which must divide the vector dimension K
-    if(vocabulary_size_ % 16 != 0)
-        throw std::invalid_argument(
-            "experiment mode requires -vocab to be divisible by 16 for IVFPQ");
+    for(const int size : vocabulary_sizes) {
+        if(size % 16 != 0)
+            throw std::invalid_argument(
+                "experiment mode requires -vocab to be divisible by 16 for IVFPQ");
+    }
+    // opened before the long computation, so an invalid path fails immediately
+    std::ofstream output(output_path);
+    if(!output)
+        throw std::runtime_error("could not open experiment output: " + output_path);
 
-    // step 1, train the vocabulary on the training sequences only
-    VocabularyData vocabulary_data;
-    vocabulary_data.splits = load_dataset_splits(split_file_);
-    const auto training_paths = get_training_image_paths(
-        hp_path_, vocabulary_data.splits.at("train"));
+    // step 1, sample the training descriptors once and train every vocabulary on the same sample
+    const auto splits = load_dataset_splits(split_file_);
+    const auto training_paths = get_training_image_paths(hp_path_, splits.at("train"));
     // seeded generator for the descriptor sampling
     std::mt19937 rng(seed_);
+    std::cout << "extracting and sampling SIFT descriptors of " << training_paths.size()
+              << " training images...\n";
     const auto training = extract_training_descriptors(
         training_paths, max_training_descriptors_, rng);
     // k-means cannot run without any descriptors
     if(training.successful_images == 0)
         throw std::runtime_error("all training images failed descriptor extraction");
-    vocabulary_data.vocabulary = compute_visual_vocabulary(
-        training.sampled_descriptors, vocabulary_size_, seed_);
-
-    // step 2, tune each approximate method on the validation set with D = 10000 distractors
-    const auto validation_dataset = get_evaluation_paths(
-        hp_path_, mir_path_, split_file_, "validation");
-    const auto validation = prepare_set(validation_dataset,
-                                        vocabulary_data.vocabulary, 10000);
-    // exact search on validation is the reference the approximate methods are compared against
-    const auto exact_validation = evaluate_configs({MethodConfig{"EXACT"}}, validation, seed_);
-    // validation results and selected configuration of each approximate method
-    std::map<std::string, std::vector<ValidationRow>> validation_rows;
-    std::map<std::string, MethodConfig> best;
-    std::map<std::string, std::size_t> selected_row;
-    for(const auto& method : {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"}) {
-        // keep only the grid entries of the current method
-        std::vector<MethodConfig> candidates;
-        for(const auto& config : validation_configs(validation.hpatches_database.size()))
-            if(config.method == method)
-                candidates.push_back(config);
-        std::cout << "tuning " << method << " on " << candidates.size()
-                  << " validation configurations...\n";
-        validation_rows[method] = evaluate_configs(candidates, validation, seed_);
-        selected_row[method] = select_config(validation_rows[method]);
-        best[method] = validation_rows[method][selected_row[method]].config;
+    std::vector<DescriptorMatrix> vocabularies;
+    for(const int size : vocabulary_sizes) {
+        std::cout << "training vocabulary K=" << size << "...\n";
+        vocabularies.push_back(compute_visual_vocabulary(
+            training.sampled_descriptors, size, seed_));
     }
 
-    // step 3, write the report starting with the selected parameters
-    std::ofstream output(output_path);
-    if(!output)
-        throw std::runtime_error("could not open experiment output: " + output_path);
+    // step 2, extract the SIFT descriptors of every image once and encode them with every vocabulary
+    const auto validation_dataset = get_evaluation_paths(
+        hp_path_, mir_path_, split_file_, "validation");
+    const auto test_dataset = get_evaluation_paths(hp_path_, mir_path_, split_file_, "test");
+    std::cout << "encoding validation and test HPatches images...\n";
+    const auto validation_set = encode_set(validation_dataset, vocabularies);
+    const auto test_set = encode_set(test_dataset, vocabularies);
+    // both sets use the first D usable MIRFlickr images, so the largest D needed is encoded once
+    // and every database takes a prefix of it
+    const int pool_size = std::max(kValidationDistractors,
+        *std::max_element(kTestDistractors.begin(), kTestDistractors.end()));
+    std::cout << "encoding up to " << pool_size << " MIRFlickr images...\n";
+    const auto pool = extract_bow_vector_sets(validation_dataset.distractor_pool, vocabularies,
+                                              static_cast<std::size_t>(pool_size));
+
+    // step 3, study every vocabulary, the sections are buffered so the comparison can come first
+    std::ostringstream sections;
+    sections << std::fixed << std::setprecision(4);
+    std::vector<ValidationRow> vocabulary_rows;
+    for(std::size_t v = 0; v < vocabulary_sizes.size(); ++v) {
+        const auto exact = study_vocabulary(sections, vocabulary_sizes[v], v, validation_set,
+                                            test_set, pool, seed_);
+        vocabulary_rows.push_back({MethodConfig{"EXACT", vocabulary_sizes[v]}, exact});
+    }
+    // the smallest vocabulary within the tolerance of the best exact validation mAP@10 is selected,
+    // since a smaller K gives shorter vectors and therefore cheaper searches
+    const std::size_t selected_vocabulary = select_row(vocabulary_rows,
+        [](const ValidationRow& row) { return row.config.first; });
+
+    // step 4, write the report
     output << std::fixed << std::setprecision(4);
     output << "# Image-search experiment\n\n";
-    output << "Vocabulary size K=" << vocabulary_size_ << ", S=" << max_training_descriptors_
-           << ", seed=" << seed_ << ".\n\n";
-    output << "Validation tuning uses D=10000 (" << validation.distractors.size()
-           << " usable MIRFlickr images, " << validation.queries.size()
-           << " queries). For each approximate method, the configurations whose mAP@10 is "
+    output << "S=" << max_training_descriptors_ << ", seed=" << seed_
+           << ". Every vocabulary is trained on the same sampled training descriptors.\n\n";
+    output << "Validation uses D=" << kValidationDistractors << " and "
+           << validation_set.queries.identifiers.size()
+           << " queries. For each approximate method, the configurations whose mAP@10 is "
               "within " << std::setprecision(2) << kMapTolerance << std::setprecision(4)
            << " of the method's best are treated as equally accurate, and the one with the "
               "fewest mean candidates (distance computations per query) is selected. The "
               "candidate count is used instead of the measured time so that the selection is "
               "reproducible.\n\n";
-    output << "## Selected validation parameters\n\n"
-              "| Method | Parameters | Validation mAP@10 | Mean candidates |\n"
-              "|---|---|---:|---:|\n";
-    for(const auto& [method, config] : best) {
-        const auto& overall = validation_rows[method][selected_row[method]].overall;
-        output << "| " << method << " | " << describe(config) << " | "
-               << overall.mean(overall.ap10) << " | " << std::setprecision(1)
-               << overall.mean(overall.candidates) << std::setprecision(4) << " |\n";
+    output << "## Vocabulary comparison\n\n"
+              "Exact search on the validation set. The smallest K within "
+           << std::setprecision(2) << kMapTolerance << std::setprecision(4)
+           << " of the best mAP@10 is selected.\n\n"
+              "| K | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) | Selected |\n"
+              "|---:|---:|---:|---:|---:|:---:|\n";
+    for(std::size_t v = 0; v < vocabulary_rows.size(); ++v) {
+        const auto& overall = vocabulary_rows[v].overall;
+        output << "| " << vocabulary_sizes[v] << " | " << overall.mean(overall.recall5) << " | "
+               << overall.mean(overall.recall10) << " | " << overall.mean(overall.ap10) << " | "
+               << overall.mean(overall.time_ms) << " | "
+               << (v == selected_vocabulary ? "yes" : "") << " |\n";
     }
-
-    output << "\n## Validation results\n\n";
-    output << "### EXACT (reference)\n\n";
-    write_validation_table(output, exact_validation, exact_validation.size());
-    for(const auto& method : {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"}) {
-        output << "\n### " << method << "\n\n";
-        write_validation_table(output, validation_rows[method], selected_row[method]);
-    }
-
-    // step 4, evaluate on the test set for each database size D, reusing the tuned parameters
-    for(const int distractor_count : {1000, 5000, 10000, 25000}) {
-        const auto test_dataset = get_evaluation_paths(
-            hp_path_, mir_path_, split_file_, "test");
-        const auto test = prepare_set(test_dataset, vocabulary_data.vocabulary,
-                                      distractor_count);
-        output << "\n## D = " << distractor_count << "\n\n";
-        // the actual number differs from D only if MIRFlickr ran out of usable images
-        output << "Usable MIRFlickr distractors: " << test.distractors.size()
-               << " (" << test.failed_distractors
-               << " skipped without SIFT descriptors), database size: "
-               << test.hpatches_database.size() << "\n";
-
-        // exact search is the baseline and needs no tuning
-        const MethodConfig exact{"EXACT"};
-        const auto exact_results = search_all(exact, test, seed_);
-        output << "\n### EXACT\n\n";
-        write_summary(output, summarize(exact_results));
-        // evaluate each approximate method with its validation-selected parameters
-        for(const auto& method : {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"}) {
-            const auto results = search_all(best.at(method), test, seed_);
-            output << "\n### " << method << "\n\n";
-            write_summary(output, summarize(results));
-        }
-    }
+    output << sections.str();
 }
 
 }  // namespace image_search

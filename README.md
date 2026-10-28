@@ -144,10 +144,24 @@ Serial:
 Images are processed in batches of 64 whose results are then consumed in input
 order, so the output is identical to a serial run: training samples are drawn
 in the same order, and the first `D` usable MIRFlickr images are the same. With
-a `D` limit, a batch never exceeds the number of images still needed. The
-number of threads follows the standard `OMP_NUM_THREADS` environment variable
-and defaults to the number of cores. OpenCV's SIFT implementation may also use
-its own internal threads for a single image.
+a `D` limit, a batch never exceeds the number of images still needed.
+
+The number of preprocessing threads is `OMP_NUM_THREADS` when that environment
+variable is set, and otherwise at most 4. Every concurrent SIFT extraction of a
+large HPatches image needs about 0.65 GB, and OpenCV's SIFT already uses
+several cores internally for a single image, so more threads mostly add memory.
+Measured on a 12-core machine with 14 GB of RAM (`-vocab 64 -D 1000`):
+
+| Threads | Wall time | Peak memory |
+|---|---:|---:|
+| serial build (no OpenMP) | 142 s | 1.9 GB |
+| 2 | 93 s | 2.6 GB |
+| 4 (default) | 74 s | 4.5 GB |
+| 8 | 66 s | 7.3 GB |
+| 12 | 66 s | 8.6 GB |
+
+The results are identical for every thread count. On a machine with less
+memory, run with `OMP_NUM_THREADS=2` or `OMP_NUM_THREADS=1`.
 
 The source files are compiled together, so `main.cpp` can include the three
 public headers while the linker resolves their implementations from the
@@ -450,6 +464,17 @@ after the requested number of usable distractors has been collected. A limit
 of zero processes every record. The helper does not decide whether failed
 records are warnings or fatal errors.
 
+### `extract_bow_vector_sets`
+
+The same operation for several vocabularies at once: each image's SIFT
+descriptors are extracted once and turned into one histogram per vocabulary,
+so comparing vocabulary sizes does not repeat the extraction.
+`MultiBowVectorResult::vectors[v][i]` is the histogram of the `i`-th usable
+image under vocabulary `v`, and `record_indices[i]` is that image's position in
+the input records, which lets a caller tell how many images were skipped before
+any prefix of the usable ones. `extract_bow_vectors` is a wrapper around it
+with a single vocabulary.
+
 ## Search Implementation and Evaluation Module
 
 The public interface is the single header
@@ -515,7 +540,8 @@ method-incompatible options terminate with an error.
 
 The current validation also enforces:
 
-- Positive `-vocab`, `-S`, and `-D`
+- `-vocab` present in single-run mode (optional with `-experiment`)
+- Positive `-vocab` (when given), `-S`, and `-D`
 - `-D` in `{1000, 5000, 10000, 25000}`
 - `-set` equal to `validation` or `test`
 - Finite, positive `-w`
@@ -643,16 +669,36 @@ writes Markdown-ready aggregate tables:
   -hp path/to/hpatches \
   -mir path/to/MIRFlickr-25K \
   -split split.txt \
-  -vocab 256 \
   -S 500 \
   -seed 1 \
   -o experimental_results.md \
   -experiment
 ```
 
-It tunes the approximate methods on validation with `D=10000`, then evaluates
-Exact, LSH, Hypercube, IVFFlat, and IVFPQ on the test set for all four required
-distractor sizes.
+Without `-vocab`, experiment mode compares the vocabulary sizes
+`K` ∈ {128, 256, 512, 1024}; with `-vocab K` it studies that single size. For
+every `K`, it tunes the approximate methods on validation with `D=10000`, then
+evaluates Exact, LSH, Hypercube, IVFFlat, and IVFPQ on the test set for all four
+required distractor sizes.
+
+All preprocessing is done once per run:
+
+- The training descriptors are sampled once, and every vocabulary is trained
+  on the same sample with the same seed.
+- The SIFT descriptors of every validation, test, and MIRFlickr image are
+  extracted once and encoded with every vocabulary
+  (`extract_bow_vector_sets`).
+- The first 25000 usable MIRFlickr images are encoded once. Validation and
+  every test `D` use the first `D` of them, which are exactly the first `D`
+  usable images in ascending order, as the assignment requires.
+- An IVF index is trained once per prepared database and reused for every
+  `nprobe` value (`withProbes`), since `nprobe` only affects the search.
+
+The vocabulary is selected with the same kind of rule as the method
+parameters: the smallest `K` whose exact-search validation mAP@10 is within
+0.01 of the best `K`, since a smaller `K` gives shorter vectors and cheaper
+searches. Test results are reported for every `K`, the selected one is marked
+in the vocabulary comparison table.
 
 Validation grid (the parameters that mainly control the quality/time
 trade-off are varied, the others are kept at fixed values):
@@ -675,7 +721,9 @@ computed (exact distances, or ADC distances for IVFPQ), recorded in
 measured query time, so the same seed always selects the same parameters.
 The report contains:
 
-- the selected parameters of every approximate method,
+- a vocabulary comparison table with the exact-search validation metrics of
+  every `K`, the selected `K` marked,
+- for every `K`, the selected parameters of every approximate method,
 - a validation table per method with Recall@5, Recall@10, mAP@10, mean query
   time, mean candidates, and the number of queries with fewer than ten results
   for every configuration, the selected one marked, plus exact search as the
@@ -691,7 +739,7 @@ The report contains:
 | `-hp <path>` | HPatches root directory | required |
 | `-mir <path>` | MIRFlickr root directory | required |
 | `-split <file>` | Training/validation/test split file | required |
-| `-vocab <int>` | Number `K` of vocabulary centers | required |
+| `-vocab <int>` | Number `K` of vocabulary centers | required, except in experiment mode, where omitting it compares 128, 256, 512, 1024 |
 | `-S <int>` | Maximum sampled training descriptors per image | `500` |
 | `-D <int>` | Usable MIRFlickr distractors | `1000` |
 | `-set validation\|test` | Evaluation split | `validation` |
@@ -734,7 +782,9 @@ Implemented search methods:
   `g(p) = sum(r_i h_i(p)) mod M`, with a fixed large modulus.
 - Hypercube search with projection vertices, Hamming-distance probes, and a
   maximum candidate limit
-- IVFFlat with k-means coarse centroids and `nprobe` lists
+- IVFFlat with k-means coarse centroids and `nprobe` lists. `withProbes`
+  returns a copy that shares the trained index with a different `nprobe`; the
+  same holds for IVFPQ.
 - IVFPQ with IVF coarse lists and product-quantized residuals. A query builds
   one `M × 2^nbits` lookup table per probed list and returns the ten stored
   vectors with the smallest asymmetric distance (the sum of `M` table lookups),
