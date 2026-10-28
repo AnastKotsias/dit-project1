@@ -19,8 +19,9 @@ namespace {
 // Calculates the number of unique values that can be represented with a given number of bits
 int checkedCodeCount(int bits) {
     // limits the codebook size to 2^16 entries, so every code fits in a uint16_t
-    if(bits <= 0 || bits > 16)
-        throw std::invalid_argument("IVFPQ nbits must be in the range 1..16");
+    if(bits <= 0 || bits > kMaxPQBits)
+        throw std::invalid_argument("IVFPQ nbits must be in the range 1.." +
+                                    std::to_string(kMaxPQBits));
     return 1 << bits;
 }
 

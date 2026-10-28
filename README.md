@@ -572,7 +572,20 @@ The current validation also enforces:
 - Finite, positive `-w`
 - Positive method parameters
 - Positive explicit `-kclusters`, `-nprobe`, and `-M`
+- `-kproj` at most 20 and `-nbits` at most 16 (`kMaxHypercubeProjections`
+  and `kMaxPQBits` in `search.hpp`, shared with the index constructors)
 - `-vocab` divisible by `-M` for IVFPQ
+- `-hp` and `-mir` are existing directories
+- With `-experiment`, none of `-D`, `-set`, `-k`, `-L`, `-w`, `-kproj`,
+  `-probes`, `-kclusters`, `-nprobe`, `-M`, `-nbits`, since experiment mode
+  chooses these itself and would otherwise ignore them silently
+
+In single-run mode, `main` also checks that the `-o` file can be opened for
+writing before any image is processed. It opens it in append mode, so an
+existing result is not truncated if the run fails later.
+
+All of these checks run before any image is processed, so invalid input fails
+immediately instead of after the preprocessing.
 
 IVF parameters use `-1` as an internal “not explicitly provided” value.
 
@@ -724,7 +737,9 @@ Without `-vocab`, experiment mode compares the vocabulary sizes
 `K` ∈ {128, 256, 512, 1024}; with `-vocab K` it studies that single size. For
 every `K`, it tunes the approximate methods on validation with `D=10000`, then
 evaluates Exact, LSH, Hypercube, IVFFlat, and IVFPQ on the test set for all four
-required distractor sizes.
+required distractor sizes. Because it chooses `D`, the query sets, and every
+method parameter itself, it rejects `-D`, `-set`, a method flag, and any
+method-specific option instead of ignoring them.
 
 All preprocessing is done once per run:
 

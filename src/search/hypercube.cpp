@@ -37,8 +37,9 @@ struct HypercubeSearch::Impl : DatabaseIndex {
                   static_cast<std::int64_t>(seed))) {
 
         // a vertex is a d'-bit integer key and the probe count is bounded by 2^d', so d' is capped
-        if(projections <= 0 || projections > 20)
-            throw std::invalid_argument("Hypercube kproj must be in the range 1..20");
+        if(projections <= 0 || projections > kMaxHypercubeProjections)
+            throw std::invalid_argument("Hypercube kproj must be in the range 1.." +
+                                        std::to_string(kMaxHypercubeProjections));
         // the window width divides the projection, so it must be positive and finite
         if(width <= 0.0 || !std::isfinite(width))
             throw std::invalid_argument("Hypercube width must be finite and positive");

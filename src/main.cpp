@@ -10,6 +10,8 @@
 #include <optional>
 #include <random>
 #include <filesystem>
+#include <fstream>
+#include <system_error>
 
 #include "dataset.hpp"
 #include "pipeline.hpp"
@@ -178,6 +180,30 @@ Args parse_args(int argc, char** argv) {
         std::cerr << "error: -experiment cannot be combined with a search method flag\n";
         std::exit(EXIT_FAILURE);
     }
+    // experiment mode chooses D, both query sets and every method parameter itself,
+    // so these options would be silently ignored and are rejected instead
+    if(args.experiment) {
+        for(const char* option : {"-D", "-set", "-k", "-L", "-w", "-kproj", "-probes",
+                                  "-kclusters", "-nprobe", "-M", "-nbits"}) {
+            if(parsed_options.count(option)) {
+                std::cerr << "error: " << option
+                          << " cannot be used with -experiment, which sets it itself\n";
+                std::exit(EXIT_FAILURE);
+            }
+        }
+    }
+
+    // the dataset directories are checked now, otherwise a wrong path would only be noticed
+    // after the training images have been processed and the vocabulary has been trained
+    std::error_code directory_error;
+    if(!std::filesystem::is_directory(args.hp_path, directory_error)) {
+        std::cerr << "error: -hp is not a directory: " << args.hp_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+    if(!std::filesystem::is_directory(args.mir_path, directory_error)) {
+        std::cerr << "error: -mir is not a directory: " << args.mir_path << "\n";
+        std::exit(EXIT_FAILURE);
+    }
 
     // reject options that do not belong to the chosen method
     if(args.method == "exact" && (parsed_options.count("-k") || parsed_options.count("-L") || parsed_options.count("-w") ||
@@ -225,6 +251,15 @@ Args parse_args(int argc, char** argv) {
     if(args.lsh_k <= 0 || args.lsh_l <= 0 || args.w <= 0.0 || args.hyper_kproj <= 0 ||
         args.hyper_probes <= 0 || args.pq_nbits <= 0) {
         std::cerr << "error: method parameters (k, L, w, kproj, probes, nbits) must be strictly positive\n";
+        std::exit(EXIT_FAILURE);
+    }
+    // upper limits of the index constructors, checked here so they fail before any image is processed
+    if(args.hyper_kproj > image_search::kMaxHypercubeProjections) {
+        std::cerr << "error: -kproj must be at most " << image_search::kMaxHypercubeProjections << "\n";
+        std::exit(EXIT_FAILURE);
+    }
+    if(args.pq_nbits > image_search::kMaxPQBits) {
+        std::cerr << "error: -nbits must be at most " << image_search::kMaxPQBits << "\n";
         std::exit(EXIT_FAILURE);
     }
     // rejects nan and inf, which pass the positivity check above
@@ -286,6 +321,13 @@ int main(int argc, char** argv) {
         }
     }
     
+    // the output file is checked before the long preprocessing, in append mode so an existing result
+    // is not truncated if the run fails later; evaluateAndWriteResults rewrites it at the end
+    if(!std::ofstream(args.out_file, std::ios::app)) {
+        std::cerr << "error: could not open output file: " << args.out_file << "\n";
+        return EXIT_FAILURE;
+    }
+
     // step 1, read the split file
     std::map<std::string, std::vector<std::string>> splits;
     try {

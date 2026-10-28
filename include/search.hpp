@@ -8,6 +8,11 @@
 
 namespace image_search {
 
+// largest hypercube dimension d', since a vertex is stored as an int key and probes are bounded by 2^d'
+constexpr int kMaxHypercubeProjections = 20;
+// largest IVFPQ code size in bits, since every code is stored in a uint16_t
+constexpr int kMaxPQBits = 16;
+
 // outcome of one query: the returned ranking, its quality metrics and the time it took
 struct SearchResult {
     std::string query_id;
