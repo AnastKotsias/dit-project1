@@ -781,7 +781,10 @@ Implemented search methods:
   combines its `k` integer bucket hashes using seeded random coefficients:
   `g(p) = sum(r_i h_i(p)) mod M`, with a fixed large modulus.
 - Hypercube search with projection vertices, Hamming-distance probes, and a
-  maximum candidate limit
+  maximum candidate limit. A query generates only the first `probes` vertices,
+  in increasing Hamming distance from its own vertex and ascending vertex
+  number within a distance, instead of sorting all `2^kproj` vertices, so the
+  probing cost depends on `probes` and not on `kproj`
 - IVFFlat with k-means coarse centroids and `nprobe` lists. `withProbes`
   returns a copy that shares the trained index with a different `nprobe`; the
   same holds for IVFPQ.

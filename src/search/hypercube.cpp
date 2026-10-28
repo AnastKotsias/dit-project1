@@ -1,7 +1,6 @@
 #include "common.hpp"
 
 #include <algorithm>
-#include <bit>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -37,7 +36,7 @@ struct HypercubeSearch::Impl : DatabaseIndex {
               offsets(projectionCount), bitSeed(static_cast<std::uint64_t>(
                   static_cast<std::int64_t>(seed))) {
 
-        // 2^d' vertices are enumerated per query, so d' is capped
+        // a vertex is a d'-bit integer key and the probe count is bounded by 2^d', so d' is capped
         if(projections <= 0 || projections > 20)
             throw std::invalid_argument("Hypercube kproj must be in the range 1..20");
         // the window width divides the projection, so it must be positive and finite
@@ -92,21 +91,43 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         return value;
     }
 
+    // Appends to keys the vertices at Hamming distance flips from queryHash in ascending order, until keys holds limit vertices
+    // bit is the highest position still to decide and prefix holds the bits already chosen above it
+    void verticesAtDistance(int queryHash, int bit, int flips, int prefix, std::size_t limit, std::vector<int>& keys) const {
+        if(keys.size() >= limit)
+            return;
+        // every bit is decided, and the pruning below guarantees exactly flips of them differ from the query
+        if(bit < 0) {
+            keys.push_back(prefix);
+            return;
+        }
+        const int queryBit = (queryHash >> bit) & 1;
+        // choosing 0 before 1 at the highest open position yields the vertices in ascending order
+        for(int value = 0; value <= 1; ++value) {
+            const int remaining = flips - (value != queryBit ? 1 : 0);
+            // only continue if the remaining flips still fit in the bit positions below this one
+            if(remaining >= 0 && remaining <= bit)
+                verticesAtDistance(queryHash, bit - 1, remaining, prefix | (value << bit), limit, keys);
+        }
+    }
+
     // Function to find candidate vectors for a given query
     std::vector<std::size_t> candidates(const Vector& query) const {
         // Compute the hash value for the query vector
         const int queryHash = hash(query);
-        std::vector<int> keys(1 << projections);    // Generate all possible keys for the hypercube
-        std::iota(keys.begin(), keys.end(), 0);
 
-        // Sort the keys based on their Hamming distance to the query hash (popcount of XOR to count differing bits)
-        std::stable_sort(keys.begin(), keys.end(), [queryHash](int a, int b) {
-            return std::popcount(static_cast<unsigned>(a ^ queryHash)) < std::popcount(static_cast<unsigned>(b ^ queryHash));});
+        // The first probes vertices in increasing Hamming distance from the query vertex, ties in ascending vertex order.
+        // They are generated one distance at a time instead of sorting all 2^d' vertices, so the cost grows with probes rather than 2^d'.
+        const std::size_t limit = std::min(static_cast<std::size_t>(std::max(probes, 0)), std::size_t{1} << projections);
+        std::vector<int> keys;
+        keys.reserve(limit);
+        for(int flips = 0; flips <= projections && keys.size() < limit; ++flips)
+            verticesAtDistance(queryHash, projections - 1, flips, 0, limit, keys);
 
         // candidates in the order the vertices are visited
         std::vector<std::size_t> result;
-        // Limit the number of probes to the specified maximum and collect candidates from the corresponding buckets
-        for(int i = 0; i < std::min(probes, static_cast<int>(keys.size())); ++i) {
+        // collect candidates from the probed vertices' buckets
+        for(std::size_t i = 0; i < keys.size(); ++i) {
             const auto found = buckets.find(keys[i]);
             if(found != buckets.end()) {
                 for(const auto index : found->second) {
