@@ -483,7 +483,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance`. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size, which `main.cpp` reports with a warning), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance` and `ivfTrainingSampleSize`, which returns the sample size ⌈√n⌉. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
@@ -660,13 +660,24 @@ range 5 to n^(1/4), chosen on the validation set. The default
 database sizes 1115, 5115, 10115, and 25115. The default `nprobe=5` is the
 assignment's; with 5 or 6 clusters it probes most or all of the lists.
 
+The IVF k-means cannot form more clusters than its ⌈√n⌉ sample vectors. A
+larger `-kclusters` is lowered to ⌈√n⌉ before the index is built, with a
+warning, and the printed `resolved IVF parameters` line shows the value actually
+used. For example, `-kclusters 100` gives 34 clusters at `D=1000` (n=1115) and
+72 at `D=5000` (n=5115).
+
 ## Command-line usage
 
 ### Build
 
 ```bash
-# Required Makefile entry point
+# Required Makefile entry point, builds build/search and links ./search to it
+# the build type is always passed to CMake, Release unless BUILD_TYPE is given
 make
+make BUILD_TYPE=Debug BUILD_DIR=build-debug
+
+# Removes the build output and the ./search link
+make clean
 
 # Equivalent direct CMake workflow (Release unless a build type is given)
 cmake -S . -B build
@@ -680,7 +691,7 @@ cmake --build build-debug -j
 ### Example
 
 ```bash
-./build/search \
+./search \
   -hp path/to/hpatches \
   -mir path/to/MIRFlickr-25K \
   -split split.txt \
@@ -699,7 +710,7 @@ Experiment mode reuses the common dataset, vocabulary, and seed arguments and
 writes Markdown-ready aggregate tables:
 
 ```bash
-./build/search \
+./search \
   -hp path/to/hpatches \
   -mir path/to/MIRFlickr-25K \
   -split split.txt \

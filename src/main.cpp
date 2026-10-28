@@ -403,6 +403,16 @@ int main(int argc, char** argv) {
             args.ivf_kclusters = std::max(5, static_cast<int>(
                 std::lround(std::pow(static_cast<double>(n_database), 0.25))));
         }
+        // the IVF k-means runs on ceil(sqrt(n)) sampled vectors and cannot form more clusters than that,
+        // so a larger value is lowered here, with a warning, and the printed value is the one actually used
+        const int max_clusters = static_cast<int>(
+            image_search::ivfTrainingSampleSize(static_cast<std::size_t>(n_database)));
+        if(args.ivf_kclusters > max_clusters) {
+            std::cerr << "warning: -kclusters " << args.ivf_kclusters
+                      << " exceeds the IVF k-means sample size ceil(sqrt(" << n_database
+                      << ")) = " << max_clusters << ", using " << max_clusters << " clusters\n";
+            args.ivf_kclusters = max_clusters;
+        }
         // default number of probed clusters is 5
         if(args.ivf_nprobe == -1) {
             args.ivf_nprobe = 5;

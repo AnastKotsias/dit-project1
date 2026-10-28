@@ -23,6 +23,10 @@ struct SearchResult {
     std::size_t candidates_examined = 0;
 };
 
+// number of database vectors the IVF k-means is trained on, ceil(sqrt(n)) for a database of n vectors
+// it is also the largest number of IVF clusters that can be formed, larger requests are capped to it
+std::size_t ivfTrainingSampleSize(std::size_t database_size);
+
 // returns the euclidean distance between two vectors of equal dimension
 double computeEuclideanDistance(const std::vector<double>& a,
                                 const std::vector<double>& b);

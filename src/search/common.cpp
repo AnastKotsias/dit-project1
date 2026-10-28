@@ -60,8 +60,7 @@ Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, in
     }
 
     // draw the sample with the seeded generator, as the first ceil(sqrt(n)) entries of a shuffled index list
-    const auto sampleSize = static_cast<std::size_t>(
-        std::ceil(std::sqrt(static_cast<double>(points.size()))));
+    const std::size_t sampleSize = ivfTrainingSampleSize(points.size());
     std::vector<std::size_t> order(points.size());
     std::iota(order.begin(), order.end(), 0);
     std::mt19937 rng(seed);
@@ -205,6 +204,11 @@ DatabaseIndex::DatabaseIndex(const std::vector<Vector>& values, const std::vecto
 }
 
 } // namespace detail
+
+// size of the random sample X' of the lecture's IVF build step
+std::size_t ivfTrainingSampleSize(std::size_t database_size) {
+    return static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(database_size))));
+}
 
 // public wrapper that takes the square root of the internal squared distance
 double computeEuclideanDistance(const std::vector<double>& a, const std::vector<double>& b) {
