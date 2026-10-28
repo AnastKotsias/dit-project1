@@ -148,7 +148,7 @@ HypercubeSearch::HypercubeSearch(const std::vector<Vector>& db, const std::vecto
 
 // HypercubeSearch search function
 SearchResult HypercubeSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
-    const auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
 }
 

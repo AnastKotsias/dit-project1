@@ -54,7 +54,7 @@ IVFFlatSearch IVFFlatSearch::withProbes(int probe_count) const {
 
 // IVFFlatSearch search function
 SearchResult IVFFlatSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
-    const auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     return buildResult(impl->database, impl->ids, impl->candidates(query, probes), query, queryId, sequenceId, start);
 }
 

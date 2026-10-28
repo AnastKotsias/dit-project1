@@ -158,7 +158,7 @@ IVFPQSearch IVFPQSearch::withProbes(int probe_count) const {
 
 // IVFPQSearch search function
 SearchResult IVFPQSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
-    const auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     // checked first, since the lookup tables index the query by the database dimension
     validateQuery(impl->database, query);
     std::size_t examined = 0;

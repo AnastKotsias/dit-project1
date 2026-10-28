@@ -75,7 +75,7 @@ Clustering clusterVectors(const std::vector<Vector>& points, int requested, int 
 }
 
 // Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
-SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
+SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start) {
     validateQuery(database, query);
 
     // candidates scored by their distance to the query
@@ -120,7 +120,7 @@ void validateQuery(const std::vector<Vector>& database, const Vector& query) {
 }
 
 // Finishes a query whose candidates are already in rank order and computes its metrics
-SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, std::size_t examined, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
+SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, std::size_t examined, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start) {
     // identifiers of the first 10 distinct valid candidates, in rank order
     std::vector<std::string> top;
     std::unordered_set<std::size_t> seen;
@@ -135,7 +135,7 @@ SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::v
     // Stop timing once the ranked top-10 result identifiers are available.
     // Ground-truth construction and metric calculation are intentionally
     // outside the measured query interval.
-    const auto end = std::chrono::high_resolution_clock::now();
+    const auto end = std::chrono::steady_clock::now();
     const double elapsed = std::chrono::duration<double, std::milli>(
         end - start).count();
 

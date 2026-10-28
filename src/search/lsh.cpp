@@ -112,7 +112,7 @@ LSHSearch::LSHSearch(const std::vector<Vector>& db, const std::vector<std::strin
 
 // LSHSearch search function
 SearchResult LSHSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
-    const auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
 }
 

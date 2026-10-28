@@ -23,7 +23,7 @@ ExactSearch::ExactSearch(const std::vector<Vector>& db,
 // scores every database vector, so the candidate list is simply all indices
 SearchResult ExactSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) {
     // timing starts before candidate generation, measures the whole search
-    const auto start = std::chrono::high_resolution_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     // candidate list containing indices 0 .. n-1
     std::vector<std::size_t> all(impl->database.size());
     std::iota(all.begin(), all.end(), 0);
