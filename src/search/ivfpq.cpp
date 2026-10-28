@@ -6,8 +6,6 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
-#include <numeric>
-#include <random>
 #include <stdexcept>
 #include <utility>
 
@@ -67,26 +65,21 @@ struct IVFPQSearch::Impl : DatabaseIndex {
                 residual[d] = database[i][d] - center[d];
         };
 
-        // codebooks are trained on a random sample of at most 2048 vectors to keep building fast
-        const std::size_t sampleLimit =
-            std::min<std::size_t>(database.size(), 2048);
-        std::vector<std::size_t> sampleIndices(database.size());
-        std::iota(sampleIndices.begin(), sampleIndices.end(), 0);
-        std::mt19937 rng(seed);
-        std::shuffle(sampleIndices.begin(), sampleIndices.end(), rng);
-
-        // training[m] holds subvector m of every sampled residual, one per row
-        std::vector<Matrix<double>> training(subquantizers, Matrix<double>(sampleLimit, width));
+        // codebooks are trained on the residuals of all n database vectors, as the assignment specifies for
+        // the IVF k-means, since without exact reranking the codebook quality bounds IVFPQ's accuracy
+        // training[m] holds subvector m of every residual, one per row
+        const std::size_t trainingSize = database.size();
+        std::vector<Matrix<double>> training(subquantizers, Matrix<double>(trainingSize, width));
         Vector residual(database.front().size());
-        for(std::size_t s = 0; s < sampleLimit; ++s) {
-            residualOf(sampleIndices[s], residual);
+        for(std::size_t i = 0; i < trainingSize; ++i) {
+            residualOf(i, residual);
             for(std::size_t m = 0; m < subquantizers; ++m)
                 std::copy(residual.begin() + m * width, residual.begin() + (m + 1) * width,
-                          training[m].row(s));
+                          training[m].row(i));
         }
 
-        // one k-means codebook of 2^nbits entries per subquantizer, fewer if there are fewer samples
-        const std::size_t codebookSize = std::min(static_cast<std::size_t>(codeCount), sampleLimit);
+        // one k-means codebook of 2^nbits entries per subquantizer, fewer if there are fewer residuals
+        const std::size_t codebookSize = std::min(static_cast<std::size_t>(codeCount), trainingSize);
         for(std::size_t m = 0; m < subquantizers; ++m)
             codebooks.push_back(image_search::kmeans(
                 training[m], codebookSize, seed + static_cast<int>(m) + 1).centers);

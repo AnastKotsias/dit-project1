@@ -822,6 +822,16 @@ Implemented search methods:
   vectors with the smallest asymmetric distance (the sum of `M` table lookups),
   without reranking by exact distance, so IVFPQ trades accuracy for speed
   relative to IVFFlat. Codes are stored as one flat array of 16-bit indices.
+  The `M` codebooks are trained on the residuals of all `n` database vectors,
+  as the assignment specifies for the IVF k-means. Since there is no
+  reranking, codebook quality bounds IVFPQ's accuracy, and the common
+  guideline of at least about 39 training points per centroid (FAISS) is
+  met for `nbits=8` from `n ≈ 10000` upward. At `D=1000` (n=1115) each
+  of the 256 centroids has about 4 training points, which the report should
+  take into account. In a benchmark on synthetic data, training one
+  codebook took about 0.5–1 s at `n=10115` and 2–5 s at `n=25115`
+  (`K=128` to `1024`), which makes it the largest part of an IVFPQ build. Only the coarse centers use the
+  ⌈√n⌉ random sample
 
 In single-run mode, all methods write the assignment's result file through
 `-o`. Exact search ranks the complete database. Approximate indexes rank only
