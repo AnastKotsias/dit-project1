@@ -504,6 +504,31 @@ This module includes the implementation of **Exact Search** (`ExactSearch` class
     the index query and stops after the ranked top-10 identifiers are
     available; ground-truth construction and metric calculations are excluded.
 - **Output Generation**: Computes overall averages across all queries (`Mean Recall@5`, `Mean Recall@10`, `mAP@10`, and `Average query time`) and writes the final evaluation report to the path specified by `-o` adhering strictly to the required output format.
+  The method name is written once as the header line, followed by one block per query and the four means.
+  A query block has no blank lines inside it, and one blank line separates it from the next block and from
+  the means. Values are printed with four decimals and query times in milliseconds:
+
+  ```text
+  IVFFLAT
+  Query: v_bird
+  Rank-1: v_bird/2
+  ...
+  Rank-10: im6.jpg
+  Recall@5: 0.4000
+  Recall@10: 0.6000
+  AP@10: 0.4333
+
+  Query: i_ski
+  ...
+
+  Mean Recall@5: 0.3000
+  Mean Recall@10: 0.4000
+  mAP@10: 0.3167
+  Average query time: 1.0000
+  ```
+
+  When an approximate method returns fewer than ten candidates, only the filled ranks are printed
+  (for example `Rank-1` to `Rank-4`), and the missing positions count as non-relevant in the metrics.
 
 ## `src/main.cpp`
 
