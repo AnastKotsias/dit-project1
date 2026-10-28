@@ -41,3 +41,10 @@ add_executable(search
 
 target_include_directories(search PRIVATE include)
 target_link_libraries(search PRIVATE ${OpenCV_LIBS})
+
+# OpenMP is optional and only parallelizes image preprocessing (SIFT extraction and BoW vectors)
+# without it the same code runs serially and produces identical results
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(search PRIVATE OpenMP::OpenMP_CXX)
+endif()

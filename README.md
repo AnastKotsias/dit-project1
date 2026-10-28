@@ -108,6 +108,9 @@ operations that can be tested independently.
 6. Builds the `search` executable from all project source files.
 7. Adds `include/` to the header search path.
 8. Links the executable with those OpenCV libraries.
+9. Links OpenMP when the compiler supports it (`find_package(OpenMP)`). It is
+   optional: without it the program builds and runs serially with identical
+   results.
 
 ### Use of OpenCV
 
@@ -117,6 +120,34 @@ descriptors (`cv::SIFT::detectAndCompute`), both inside
 copied out of the `cv::Mat` before that function returns. Everything else,
 including descriptor storage, sampling, k-means, nearest-centroid assignment,
 and all distance computations, is implemented in this project.
+
+### Parallelism
+
+Image preprocessing runs in parallel with OpenMP;
+the search runs serially on a single thread for every method, so query times
+are comparable.
+
+Parallel (in [`src/pipeline.cpp`](src/pipeline.cpp), one image per iteration):
+
+- `extract_training_descriptors`: reading each training image and extracting
+  its SIFT descriptors.
+- `extract_bow_vectors`: reading each HPatches, MIRFlickr, or query image,
+  extracting its SIFT descriptors, and building its BoVW histogram.
+
+Serial:
+
+- Sampling the `S` training descriptors per image, in image order with the
+  seeded generator.
+- k-means for the visual vocabulary and for the IVFFlat/IVFPQ indexes.
+- Index construction and every search.
+
+Images are processed in batches of 64 whose results are then consumed in input
+order, so the output is identical to a serial run: training samples are drawn
+in the same order, and the first `D` usable MIRFlickr images are the same. With
+a `D` limit, a batch never exceeds the number of images still needed. The
+number of threads follows the standard `OMP_NUM_THREADS` environment variable
+and defaults to the number of cores. OpenCV's SIFT implementation may also use
+its own internal threads for a single image.
 
 The source files are compiled together, so `main.cpp` can include the three
 public headers while the linker resolves their implementations from the
