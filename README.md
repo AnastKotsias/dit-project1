@@ -276,7 +276,10 @@ retains regular `.jpg`, `.jpeg`, `.JPG`, and `.JPEG` files. Canonical filenames
 such as `im1.jpg`, `im2.jpg`, and `im10.jpg` are ordered numerically rather than
 lexicographically. This is important because the assignment defines the
 distractor set as the first `D` images in ascending numerical order. Files
-without a valid `im<number>` stem use deterministic filename ordering. The
+without a valid `im<number>` stem come after all numbered ones, in filename
+order, and equal numbers (such as `im1.jpg` and `im01.jpg`) are ordered by
+filename. Sorting by the single key (has no number, number, filename) keeps the
+comparison a strict weak ordering, as `std::sort` requires. The
 helper does not inspect image contents; SIFT-based usability filtering is
 performed later by `main.cpp`.
 
@@ -896,7 +899,14 @@ approximate result may contain fewer than ten entries, and missing positions
 are treated as non-relevant when computing the metrics.
 
 Search constructors reject empty identifiers, inconsistent dimensions, and
-non-finite database values. Query dimensions are checked as an internal
+non-finite database values. They also check their own parameters, so the
+classes are safe to use without the command-line checks: positive `k`, `L`,
+`kproj` (at most 20), `M`, `probes`, `kclusters`, and `nprobe` (also in
+`withProbes`), `nbits` in 1..16, and a finite positive `w`. Every search
+validates the query before generating candidates, so LSH and Hypercube never
+hash a non-finite query. The window number `floor(projection / w)` is computed by
+`windowIndex`, which throws instead of converting a value outside the 64-bit
+range, which could only happen with an extremely small `w`. Query dimensions are checked as an internal
 assertion and also reported as an exception in release builds; non-finite
 query values are rejected explicitly. An empty approximate candidate set is
 not an API error because the assignment defines missing result positions as

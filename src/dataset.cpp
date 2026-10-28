@@ -9,6 +9,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace image_search {
 
@@ -62,17 +63,15 @@ std::vector<std::filesystem::path> list_mirflickr_images(
         }
     }
 
-    // sort by image number when both names carry one, otherwise fall back to alphabetical order
+    // numbered names come first in numeric order, so im2 comes before im10, then any other names
+    // alphabetically; comparing (has no number, number, file name) as one key keeps this a strict
+    // weak ordering, which std::sort requires, even when numbered and other names are mixed
     std::sort(images.begin(), images.end(),
         [](const fs::path& left, const fs::path& right) {
             const auto left_number = extract_image_number(left);
             const auto right_number = extract_image_number(right);
-            // compare numerically so that im2 comes before im10
-            if(left_number && right_number && *left_number != *right_number) {
-                return *left_number < *right_number;
-            }
-            // tie-breaker that keeps the order deterministic
-            return left.filename().string() < right.filename().string();
+            return std::make_tuple(!left_number, left_number.value_or(0), left.filename().string()) <
+                   std::make_tuple(!right_number, right_number.value_or(0), right.filename().string());
         });
     return images;
 }

@@ -90,9 +90,8 @@ Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, in
 }
 
 // Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
+// the query has already been checked by validateQuery in the calling search
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start) {
-    validateQuery(database, query);
-
     // candidates scored by their distance to the query
     std::vector<ScoredId> ranked;
     ranked.reserve(candidates.size());
@@ -132,6 +131,25 @@ void validateQuery(const std::vector<Vector>& database, const Vector& query) {
     if(!std::all_of(query.begin(), query.end(),
                     [](double value) { return std::isfinite(value); }))
         throw std::invalid_argument("query vector contains non-finite values");
+}
+
+// window number of a projection, rejected rather than converted when it is outside the int64 range,
+// since converting such a double is undefined behaviour
+std::int64_t windowIndex(double projection, double width) {
+    const double window = std::floor(projection / width);
+    // -2^63 is the smallest int64 and 2^63 the first value above the largest, both exact as doubles;
+    // a NaN fails both comparisons
+    constexpr double limit = 9223372036854775808.0;
+    if(!(window >= -limit && window < limit))
+        throw std::range_error("hash window number does not fit in 64 bits, the width w is too small");
+    return static_cast<std::int64_t>(window);
+}
+
+// at least one inverted list must be searched, otherwise every query would return nothing
+int checkedProbes(int probes) {
+    if(probes <= 0)
+        throw std::invalid_argument("IVF nprobe must be strictly positive");
+    return probes;
 }
 
 // Finishes a query whose candidates are already in rank order and computes its metrics

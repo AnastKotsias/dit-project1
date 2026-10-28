@@ -79,8 +79,7 @@ struct LSHSearch::Impl : DatabaseIndex {
                 point.begin(), point.end(), projections[table][h].begin(),
                 offsets[table][h]);
             // h_i(p), which can be negative
-            const auto bucket = static_cast<std::int64_t>(
-                std::floor(dot / width));
+            const std::int64_t bucket = windowIndex(dot, width);
             // shifts the bucket number into [0, M) even when it is negative
             const auto normalized = static_cast<std::uint64_t>(
                 ((bucket % static_cast<std::int64_t>(modulus)) +
@@ -113,6 +112,8 @@ LSHSearch::LSHSearch(const std::vector<Vector>& db, const std::vector<std::strin
 // LSHSearch search function
 SearchResult LSHSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     const auto start = std::chrono::steady_clock::now();
+    // checked before hashing, since a non-finite query cannot be mapped to a bucket
+    validateQuery(impl->database, query);
     return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
 }
 

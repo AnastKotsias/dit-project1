@@ -24,6 +24,7 @@ ExactSearch::ExactSearch(const std::vector<Vector>& db,
 SearchResult ExactSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     // timing starts before candidate generation, measures the whole search
     const auto start = std::chrono::steady_clock::now();
+    validateQuery(impl->database, query);
     // candidate list containing indices 0 .. n-1
     std::vector<std::size_t> all(impl->database.size());
     std::iota(all.begin(), all.end(), 0);

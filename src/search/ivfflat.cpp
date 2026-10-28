@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace image_search {
@@ -19,6 +20,8 @@ struct IVFFlatSearch::Impl : DatabaseIndex {
     // Constructor to initialize the IVFFlat index
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int seed)
             : DatabaseIndex{db, names} {
+        if(clusterCount <= 0)
+            throw std::invalid_argument("IVFFlat kclusters must be strictly positive");
         auto clustering = trainIVFClusters(database, clusterCount, seed);
         centers = std::move(clustering.centers);
 
@@ -43,18 +46,19 @@ struct IVFFlatSearch::Impl : DatabaseIndex {
 
 // IVFFlatSearch constructor
 IVFFlatSearch::IVFFlatSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int clusters, int probes, int seed)
-    : impl(std::make_shared<Impl>(db, ids, clusters, seed)), probes(probes) {}
+    : impl(std::make_shared<Impl>(db, ids, clusters, seed)), probes(checkedProbes(probes)) {}
 
 // copies the handle, so the trained index is shared rather than rebuilt
 IVFFlatSearch IVFFlatSearch::withProbes(int probe_count) const {
     IVFFlatSearch copy = *this;
-    copy.probes = probe_count;
+    copy.probes = checkedProbes(probe_count);
     return copy;
 }
 
 // IVFFlatSearch search function
 SearchResult IVFFlatSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     const auto start = std::chrono::steady_clock::now();
+    validateQuery(impl->database, query);
     return buildResult(impl->database, impl->ids, impl->candidates(query, probes), query, queryId, sequenceId, start);
 }
 

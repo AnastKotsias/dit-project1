@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,7 +39,15 @@ struct Clustering {
 Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, int seed);
 
 // Checks that the query has the database dimension and only finite values, throws otherwise
+// every search calls it before generating candidates, so hashing never sees an invalid query
 void validateQuery(const std::vector<Vector>& database, const Vector& query);
+
+// window number floor(projection / width) of the LSH and hypercube hash functions
+// throws if it does not fit in 64 bits, which a finite query can only cause with an extremely small width
+std::int64_t windowIndex(double projection, double width);
+
+// checks the nprobe of IVFFlat and IVFPQ, at least one list must be searched
+int checkedProbes(int probes);
 
 // Finishes a query whose candidates are already in rank order: keeps the first 10 distinct ones,
 // stops the timer that started at start and computes the metrics

@@ -42,6 +42,8 @@ struct IVFPQSearch::Impl : DatabaseIndex {
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int subCount, int bits, int seed)
             : DatabaseIndex{db, names} {
         const int codeCount = checkedCodeCount(bits);
+        if(clusterCount <= 0)
+            throw std::invalid_argument("IVFPQ kclusters must be strictly positive");
         // Check for valid subquantizer count and ensure it divides the vector dimension
         if(subCount <= 0)
             throw std::invalid_argument("IVFPQ M must be positive");
@@ -81,9 +83,13 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
         // one k-means codebook of 2^nbits entries per subquantizer, fewer if there are fewer residuals
         const std::size_t codebookSize = std::min(static_cast<std::size_t>(codeCount), trainingSize);
-        for(std::size_t m = 0; m < subquantizers; ++m)
-            codebooks.push_back(image_search::kmeans(
-                training[m], codebookSize, seed + static_cast<int>(m) + 1).centers);
+        // seed + m + 1 is computed in unsigned arithmetic, which wraps instead of overflowing for a seed
+        // near INT_MAX, and converted back to int, which C++20 defines as modular
+        for(std::size_t m = 0; m < subquantizers; ++m) {
+            const auto codebookSeed = static_cast<int>(
+                static_cast<unsigned int>(seed) + static_cast<unsigned int>(m) + 1U);
+            codebooks.push_back(image_search::kmeans(training[m], codebookSize, codebookSeed).centers);
+        }
 
         // Encode each database residual with the corresponding PQ codebooks.
         codes.resize(database.size() * subquantizers);
@@ -141,12 +147,12 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
 // IVFPQSearch constructor
 IVFPQSearch::IVFPQSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int clusters, int probes, int subquantizers, int bits, int seed)
-    : impl(std::make_shared<Impl>(db, ids, clusters, subquantizers, bits, seed)), probes(probes) {}
+    : impl(std::make_shared<Impl>(db, ids, clusters, subquantizers, bits, seed)), probes(checkedProbes(probes)) {}
 
 // copies the handle, so the trained index is shared rather than rebuilt
 IVFPQSearch IVFPQSearch::withProbes(int probe_count) const {
     IVFPQSearch copy = *this;
-    copy.probes = probe_count;
+    copy.probes = checkedProbes(probe_count);
     return copy;
 }
 

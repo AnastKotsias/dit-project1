@@ -43,6 +43,11 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         // the window width divides the projection, so it must be positive and finite
         if(width <= 0.0 || !std::isfinite(width))
             throw std::invalid_argument("Hypercube width must be finite and positive");
+        // the candidate budget M and the vertex budget must allow at least one candidate
+        if(maxCandidates <= 0)
+            throw std::invalid_argument("Hypercube M must be strictly positive");
+        if(probes <= 0)
+            throw std::invalid_argument("Hypercube probes must be strictly positive");
 
         std::mt19937 rng(seed);
         std::normal_distribution<double> normal(0.0, 1.0);
@@ -83,8 +88,7 @@ struct HypercubeSearch::Impl : DatabaseIndex {
             // projection of the point onto the i-th random vector
             const double dot = std::inner_product(point.begin(), point.end(), vectors[i].begin(), 0.0);
             // window number of the shifted projection
-            const auto bucket = static_cast<std::int64_t>(
-                std::floor((dot + offsets[i]) / width));
+            const std::int64_t bucket = windowIndex(dot + offsets[i], width);
             // set bit i when the window number maps to 1
             if(mapToBit(i, bucket) != 0)
                 value |= (1 << i);
@@ -119,7 +123,7 @@ struct HypercubeSearch::Impl : DatabaseIndex {
 
         // The first probes vertices in increasing Hamming distance from the query vertex, ties in ascending vertex order.
         // They are generated one distance at a time instead of sorting all 2^d' vertices, so the cost grows with probes rather than 2^d'.
-        const std::size_t limit = std::min(static_cast<std::size_t>(std::max(probes, 0)), std::size_t{1} << projections);
+        const std::size_t limit = std::min(static_cast<std::size_t>(probes), std::size_t{1} << projections);
         std::vector<int> keys;
         keys.reserve(limit);
         for(int flips = 0; flips <= projections && keys.size() < limit; ++flips)
@@ -150,6 +154,8 @@ HypercubeSearch::HypercubeSearch(const std::vector<Vector>& db, const std::vecto
 // HypercubeSearch search function
 SearchResult HypercubeSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     const auto start = std::chrono::steady_clock::now();
+    // checked before hashing, since a non-finite query cannot be mapped to a vertex
+    validateQuery(impl->database, query);
     return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
 }
 
