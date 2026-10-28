@@ -32,6 +32,8 @@ constexpr int kValidationDistractors = 10000;
 constexpr std::array<int, 4> kTestDistractors = {1000, 5000, 10000, 25000};
 // approximate methods, tuned on validation and evaluated on test
 constexpr std::array<const char*, 4> kApproximateMethods = {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"};
+// timed passes over the query set after one untimed warm-up pass, each query reports its median time
+constexpr std::size_t kTimedPasses = 5;
 
 // one candidate parameter setting of a search method
 // the meaning of the numbered fields depends on the method, see search_all
@@ -190,9 +192,30 @@ std::vector<SearchResult> search_all(const MethodConfig& config,
     // runs all queries on any index type, since every class exposes the same search method
     // a forwarding reference accepts both named indexes and the copies made by withProbes
     auto search = [&](auto&& index) {
+        const auto run = [&](std::size_t i) {
+            return index.search(data.queries[i], data.query_ids[i], data.sequence_ids[i]);
+        };
+        // untimed warm-up pass, so the first queries do not pay for cold caches and lazy allocations
         for(std::size_t i = 0; i < data.queries.size(); ++i)
-            results.push_back(index.search(data.queries[i], data.query_ids[i],
-                                           data.sequence_ids[i]));
+            (void)run(i);
+        // the first timed pass keeps the results, the searches are deterministic so later passes
+        // return the same rankings and only contribute their times
+        // whole passes are repeated rather than one query several times in a row, so a query does
+        // not find its own candidates still in the cache
+        std::vector<std::array<double, kTimedPasses>> times(data.queries.size());
+        for(std::size_t i = 0; i < data.queries.size(); ++i) {
+            results.push_back(run(i));
+            times[i][0] = results.back().query_time_ms;
+        }
+        for(std::size_t pass = 1; pass < kTimedPasses; ++pass)
+            for(std::size_t i = 0; i < data.queries.size(); ++i)
+                times[i][pass] = run(i).query_time_ms;
+        // the median ignores single runs slowed down by the operating system
+        for(std::size_t i = 0; i < data.queries.size(); ++i) {
+            auto& query_times = times[i];
+            std::nth_element(query_times.begin(), query_times.begin() + kTimedPasses / 2, query_times.end());
+            results[i].query_time_ms = query_times[kTimedPasses / 2];
+        }
     };
 
     // pick the index class from the method name and construct it with the configured parameters
@@ -546,6 +569,10 @@ void ExperimentRunner::run(const std::string& output_path) {
               "fewest mean candidates (distance computations per query) is selected. The "
               "candidate count is used instead of the measured time so that the selection is "
               "reproducible.\n\n";
+    output << "Query times are single-threaded. Every configuration first runs the whole query "
+              "set once untimed as a warm-up, then " << kTimedPasses << " timed passes over the "
+              "query set; each query's time is the median of its " << kTimedPasses
+           << " runs, and the reported time is the mean of these medians.\n\n";
     output << "## Vocabulary comparison\n\n"
               "Exact search on the validation set. The smallest K within "
            << std::setprecision(2) << kMapTolerance << std::setprecision(4)

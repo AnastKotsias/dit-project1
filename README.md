@@ -737,6 +737,17 @@ Candidates are the distinct database vectors whose distance to the query was
 computed (exact distances, or ADC distances for IVFPQ), recorded in
 `SearchResult::candidates_examined`. This count is deterministic, unlike the
 measured query time, so the same seed always selects the same parameters.
+
+Query times in experiment mode are measured with a warm-up and repetitions.
+For every configuration, the whole query set first runs once untimed, so the
+first queries do not pay for cold caches. Then 5 timed passes run over the
+query set (`kTimedPasses`). Each query's time is the median of its 5 runs, and
+the reported mean query time is the mean of these medians. Whole passes are
+repeated rather than one query several times in a row, so a query does not
+find its own candidates still in the cache. The median ignores single runs
+slowed down by the operating system. The searches are deterministic, so the
+rankings and metrics are those of the first timed pass. Single-run mode
+searches each query once and reports that time.
 The report contains:
 
 - a vocabulary comparison table with the exact-search validation metrics of
