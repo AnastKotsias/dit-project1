@@ -210,9 +210,4 @@ std::size_t ivfTrainingSampleSize(std::size_t database_size) {
     return static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(database_size))));
 }
 
-// public wrapper that takes the square root of the internal squared distance
-double computeEuclideanDistance(const std::vector<double>& a, const std::vector<double>& b) {
-    return std::sqrt(detail::squaredEuclideanDistance(a, b));
-}
-
 } // namespace image_search

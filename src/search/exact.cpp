@@ -21,7 +21,7 @@ ExactSearch::ExactSearch(const std::vector<Vector>& db,
     : impl(std::make_shared<Impl>(db, ids)) {}
 
 // scores every database vector, so the candidate list is simply all indices
-SearchResult ExactSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) {
+SearchResult ExactSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     // timing starts before candidate generation, measures the whole search
     const auto start = std::chrono::steady_clock::now();
     // candidate list containing indices 0 .. n-1

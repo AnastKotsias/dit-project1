@@ -18,11 +18,11 @@ struct SearchResult {
     std::string query_id;
     // fewer than 10 if the index returned fewer candidates
     std::vector<std::string> top_10_ids;
-    double recall_5;
-    double recall_10;
-    double ap_10;
+    double recall_5 = 0.0;
+    double recall_10 = 0.0;
+    double ap_10 = 0.0;
     // search time in milliseconds, excluding feature extraction and metric computation
-    double query_time_ms;
+    double query_time_ms = 0.0;
     // distinct database vectors whose distance to the query was computed, exact distances for
     // every method except IVFPQ, which counts ADC distances; a deterministic measure of search cost
     std::size_t candidates_examined = 0;
@@ -31,10 +31,6 @@ struct SearchResult {
 // number of database vectors the IVF k-means is trained on, ceil(sqrt(n)) for a database of n vectors
 // it is also the largest number of IVF clusters that can be formed, larger requests are capped to it
 std::size_t ivfTrainingSampleSize(std::size_t database_size);
-
-// returns the euclidean distance between two vectors of equal dimension
-double computeEuclideanDistance(const std::vector<double>& a,
-                                const std::vector<double>& b);
 
 // exhaustive search that compares the query against every database vector
 class ExactSearch {
@@ -45,12 +41,12 @@ private:
     std::shared_ptr<Impl> impl;
 
 public:
-    // Ιnitialization of the ExactSearch class with database BoW vectors and their identifiers
+    // Initialization of the ExactSearch class with database BoW vectors and their identifiers
     ExactSearch(const std::vector<std::vector<double>>& db_bows,
                 const std::vector<std::string>& db_ids);
 
     // returns the exact top 10 neighbours of the query together with its metrics
-    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id);
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
 // locality sensitive hashing with L hash tables, each using k hash functions of width w

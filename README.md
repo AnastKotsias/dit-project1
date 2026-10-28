@@ -483,7 +483,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size, which `main.cpp` reports with a warning), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance` and `ivfTrainingSampleSize`, which returns the sample size ⌈√n⌉. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size, which `main.cpp` reports with a warning), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `ivfTrainingSampleSize`, which returns the sample size ⌈√n⌉. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
@@ -621,15 +621,18 @@ The current `main` function performs these stages:
 6. Count failures and abort clearly if every training image fails.
 7. Train the visual vocabulary.
 8. Construct query, HPatches database, and MIRFlickr distractor records.
-9. Delegate HPatches database vectorization to the pipeline module.
+9. Delegate HPatches database vectorization to the pipeline module and reject
+   any failed image.
 10. Delegate MIRFlickr vectorization with a successful-image limit of `D`.
 11. Resolve IVF defaults after the final database size is known.
 12. Delegate query vectorization and reject any failed query.
 13. Print the number of prepared database and query vectors.
 
 Unreadable or descriptor-less training images generate warnings and are
-excluded. Invalid HPatches database images are also skipped. Query failures are
-fatal because queries cannot silently disappear from evaluation. If fewer than
+excluded. Every HPatches image must be usable, in single-run and experiment
+mode alike: a failed database image is fatal, because its sequence would lose
+one of the exactly five relevant images the assignment defines, and a failed
+query is fatal because queries cannot silently disappear from evaluation. If fewer than
 `D` usable MIRFlickr images exist, the program prints a warning with the actual
 number and the number of skipped images, and continues with all usable images.
 After writing the result file it also prints how many queries returned fewer

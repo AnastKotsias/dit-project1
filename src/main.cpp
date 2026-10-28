@@ -397,14 +397,17 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    // convert the HPatches database images to BoW vectors, skipping unusable ones with a warning
+    // convert the HPatches database images to BoW vectors, every one of which must be usable,
+    // otherwise its sequence would lose one of its five relevant images, as in experiment mode
     const auto hpatches_database = image_search::extract_bow_vectors(
         evaluation_dataset.database, vocabulary);
-    for(const auto& record : hpatches_database.failed_records) {
-        std::cerr << "warning: skipping invalid HPatches database image: "
-                  << record.record.filepath << " ("
-                  << image_search::sift_extraction_status_name(record.status)
+    if(!hpatches_database.failed_records.empty()) {
+        const auto& failed = hpatches_database.failed_records.front();
+        std::cerr << "error: an HPatches database image failed descriptor extraction: "
+                  << failed.record.filepath << " ("
+                  << image_search::sift_extraction_status_name(failed.status)
                   << ")\n";
+        return EXIT_FAILURE;
     }
 
     // take the first D usable MIRFlickr images as distractors
