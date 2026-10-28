@@ -13,16 +13,13 @@ namespace image_search {
 namespace detail {
 
 // Calculates the squared Euclidean distance between two vectors
+// uses the same four-accumulator loop as k-means and the IVFPQ lookup tables,
+// so every method pays the same price per distance
 double squaredEuclideanDistance(const Vector& a, const Vector& b) {
     if(a.size() != b.size()) {
         throw std::invalid_argument("search vectors have inconsistent dimensions");
     };
-    double result = 0.0;
-    for(std::size_t i = 0; i < a.size(); ++i) {
-        const double difference = a[i] - b[i];
-        result += difference * difference;
-    };
-    return result;
+    return squared_distance(a.data(), b.data(), a.size());
 }
 
 // Finds the "count" nearest centers to a given query vector
@@ -83,12 +80,15 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
 
     // candidates scored by their distance to the query
     std::vector<ScoredId> ranked;
-    // Use a set to ensure unique candidates and avoid duplicates
-    std::unordered_set<std::size_t> unique;
+    ranked.reserve(candidates.size());
+    // seen[i] marks database vector i as already scored, so duplicates are skipped
+    // a flag array avoids the allocation and hashing a set would cost per candidate
+    std::vector<char> seen(database.size(), 0);
     // Rank only candidates returned by the index. Approximate methods must not
     // silently turn an empty candidate set into an exact search.
     for(const auto index : candidates) {
-        if(index < database.size() && unique.insert(index).second) {
+        if(index < database.size() && !seen[index]) {
+            seen[index] = 1;
             ranked.emplace_back(squaredEuclideanDistance(query, database[index]), index);
         }
     }

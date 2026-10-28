@@ -483,7 +483,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance, nearest-center lookup, `clusterVectors`, which runs the shared k-means of the k-means module on BoVW vectors for IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance`. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `clusterVectors`, which runs the shared k-means of the k-means module on BoVW vectors for IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance`. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
