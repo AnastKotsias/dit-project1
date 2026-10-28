@@ -104,7 +104,8 @@ struct IVFPQSearch::Impl : DatabaseIndex {
     }
 
     // returns the database indices of the 10 smallest ADC distances among the probed lists, nearest first
-    std::vector<std::size_t> candidates(const Vector& query) const {
+    // examined receives the number of ADC distances computed
+    std::vector<std::size_t> candidates(const Vector& query, std::size_t& examined) const {
         const auto selected = nearestCenters(query, centers, probes);   // Find the nearest coarse cluster centers to the query vector
         const std::size_t codebookSize = codebooks.front().rows;
         // stored vectors with their ADC distance to the query
@@ -134,6 +135,7 @@ struct IVFPQSearch::Impl : DatabaseIndex {
             }
         }
 
+        examined = ranked.size();
         // only the 10 nearest by ADC are returned, there is no reranking by exact distance
         const std::size_t limit = std::min<std::size_t>(10, ranked.size());
         std::partial_sort(ranked.begin(), ranked.begin() + limit, ranked.end());
@@ -153,7 +155,9 @@ SearchResult IVFPQSearch::search(const Vector& query, const std::string& queryId
     const auto start = std::chrono::high_resolution_clock::now();
     // checked first, since the lookup tables index the query by the database dimension
     validateQuery(impl->database, query);
-    return buildRankedResult(impl->ids, impl->candidates(query), queryId, sequenceId, start);
+    std::size_t examined = 0;
+    const auto ranked = impl->candidates(query, examined);
+    return buildRankedResult(impl->ids, ranked, examined, queryId, sequenceId, start);
 }
 
 } // namespace image_search

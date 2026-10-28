@@ -101,7 +101,8 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
     for(std::size_t i = 0; i < limit; ++i) {
         order.push_back(ranked[i].second);
     }
-    return buildRankedResult(ids, order, queryId, sequenceId, start);
+    // every distinct valid candidate cost one exact distance computation
+    return buildRankedResult(ids, order, ranked.size(), queryId, sequenceId, start);
 }
 
 // Checks that a query can be compared with the database vectors
@@ -119,7 +120,7 @@ void validateQuery(const std::vector<Vector>& database, const Vector& query) {
 }
 
 // Finishes a query whose candidates are already in rank order and computes its metrics
-SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
+SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, std::size_t examined, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start) {
     // identifiers of the first 10 distinct valid candidates, in rank order
     std::vector<std::string> top;
     std::unordered_set<std::size_t> seen;
@@ -161,7 +162,7 @@ SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::v
     }
 
     // recall divides by the 5 relevant images, and AP also divides by 5
-    return {queryId, top, matches5 / 5.0, matches10 / 5.0, apSum / 5.0, elapsed};
+    return {queryId, top, matches5 / 5.0, matches10 / 5.0, apSum / 5.0, elapsed, examined};
 }
 
 // Constructor to initialize the database index with vectors and their corresponding identifiers

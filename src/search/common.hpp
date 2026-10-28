@@ -41,7 +41,8 @@ void validateQuery(const std::vector<Vector>& database, const Vector& query);
 
 // Finishes a query whose candidates are already in rank order: keeps the first 10 distinct ones,
 // stops the timer that started at start and computes the metrics
-SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start);
+// examined is the number of distances the index computed to produce the ranking
+SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, std::size_t examined, const std::string& queryId, const std::string& sequenceId, std::chrono::high_resolution_clock::time_point start);
 
 // Common result-building function used by Exact, LSH, Hypercube and IVFFlat search
 // ranks the candidates by exact euclidean distance to the query, then calls buildRankedResult

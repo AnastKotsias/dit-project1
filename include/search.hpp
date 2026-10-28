@@ -18,6 +18,9 @@ struct SearchResult {
     double ap_10;
     // search time in milliseconds, excluding feature extraction and metric computation
     double query_time_ms;
+    // distinct database vectors whose distance to the query was computed, exact distances for
+    // every method except IVFPQ, which counts ADC distances; a deterministic measure of search cost
+    std::size_t candidates_examined = 0;
 };
 
 // returns the euclidean distance between two vectors of equal dimension

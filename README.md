@@ -619,14 +619,39 @@ writes Markdown-ready aggregate tables:
   -experiment
 ```
 
-It tunes the approximate methods on validation with `D=10000`, selecting the
-configuration with the highest mAP@10, then evaluates Exact, LSH, Hypercube,
-IVFFlat, and IVFPQ on the test set for all four required distractor sizes.
-The report contains overall, illumination, and viewpoint aggregates, the number
-of queries that returned fewer than ten results, and, for every `D`, the actual
-number of usable MIRFlickr distractors and the resulting database size. The
-validation grids focus on the principal quality/time parameters rather than
-performing an exhaustive search of every parameter.
+It tunes the approximate methods on validation with `D=10000`, then evaluates
+Exact, LSH, Hypercube, IVFFlat, and IVFPQ on the test set for all four required
+distractor sizes.
+
+Validation grid (the parameters that mainly control the quality/time
+trade-off are varied, the others are kept at fixed values):
+
+| Method | Varied | Fixed |
+|---|---|---|
+| LSH | `w` ∈ {0.01, 0.025, 0.05, 0.1}, `L` ∈ {3, 5, 7, 9} | `k=4` |
+| Hypercube | `M` ∈ {250, 500, 1000, 2000}, `probes` ∈ {5, 10, 20, 40} | `kproj=10`, `w=0.05` |
+| IVFFlat | `nprobe` ∈ {1, 2, 5, 10, 20} | `kclusters=⌈√n⌉` |
+| IVFPQ | `nprobe` ∈ {1, 2, 5, 10, 20} | `kclusters=⌈√n⌉`, `M=16`, `nbits=8` |
+
+Selection rule: for each method, every configuration whose validation mAP@10
+is within 0.01 of that method's best counts as equally accurate, and among
+them the one with the fewest mean candidates is selected, the first in grid
+order on ties. With 23 validation queries, a change of 0.23 in a single query's
+AP already moves mAP@10 by 0.01, so smaller differences are not meaningful.
+Candidates are the distinct database vectors whose distance to the query was
+computed (exact distances, or ADC distances for IVFPQ), recorded in
+`SearchResult::candidates_examined`. This count is deterministic, unlike the
+measured query time, so the same seed always selects the same parameters.
+The report contains:
+
+- the selected parameters of every approximate method,
+- a validation table per method with Recall@5, Recall@10, mAP@10, mean query
+  time, mean candidates, and the number of queries with fewer than ten results
+  for every configuration, the selected one marked, plus exact search as the
+  reference,
+- for every `D`, the actual number of usable MIRFlickr distractors, the
+  database size, and overall, illumination, and viewpoint aggregates of every
+  method on the test set, with the same columns.
 
 ### Common options
 
@@ -701,9 +726,10 @@ not an API error because the assignment defines missing result positions as
 non-relevant.
 
 Experiment mode writes a separate Markdown-ready report through `-o`, including
-the validation-selected parameters and aggregate test results for each
-required distractor size, with the actual number of usable distractors and the
-number of queries with fewer than ten results.
+the validation results of every configuration, the selected parameters, and
+aggregate test results for each required distractor size, with the actual
+number of usable distractors and the number of queries with fewer than ten
+results.
 
 ## Development configuration
 

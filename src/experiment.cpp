@@ -11,7 +11,7 @@
 #include <iostream>
 #include <iomanip>
 #include <map>
-#include <numeric>
+#include <sstream>
 #include <random>
 #include <stdexcept>
 #include <utility>
@@ -39,6 +39,8 @@ struct Aggregate {
     double recall10 = 0.0;
     double ap10 = 0.0;
     double time_ms = 0.0;
+    // distances computed per query, the deterministic cost used to compare configurations
+    double candidates = 0.0;
     // number of queries added so far
     std::size_t count = 0;
     // queries for which the index returned fewer than 10 results, reported by the assignment
@@ -50,6 +52,7 @@ struct Aggregate {
         recall10 += result.recall_10;
         ap10 += result.ap_10;
         time_ms += result.query_time_ms;
+        candidates += static_cast<double>(result.candidates_examined);
         ++count;
         if(result.top_10_ids.size() < 10)
             ++short_results;
@@ -199,16 +202,6 @@ std::vector<SearchResult> search_all(const MethodConfig& config,
     return results;
 }
 
-// returns the mean of AP@10 over the results, which is the mAP@10 used to rank configurations
-double mean_ap(const std::vector<SearchResult>& results) {
-    if(results.empty())
-        return 0.0;
-    return std::accumulate(results.begin(), results.end(), 0.0,
-        [](double total, const SearchResult& result) {
-            return total + result.ap_10;
-        }) / static_cast<double>(results.size());
-}
-
 // groups the results into overall, illumination and viewpoint metrics
 Summary summarize(const std::vector<SearchResult>& results) {
     Summary summary;
@@ -226,8 +219,8 @@ Summary summarize(const std::vector<SearchResult>& results) {
 // writes a markdown table with one row per category
 void write_summary(std::ofstream& output, const Summary& summary) {
     output << "| Category | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) "
-              "| Queries with < 10 results |\n"
-              "|---|---:|---:|---:|---:|---:|\n";
+              "| Mean candidates | Queries with < 10 results |\n"
+              "|---|---:|---:|---:|---:|---:|---:|\n";
     // formats the mean metrics of one category as a row
     const auto write_row = [&](const char* name, const Aggregate& aggregate) {
         output << "| " << name << " | "
@@ -235,6 +228,8 @@ void write_summary(std::ofstream& output, const Summary& summary) {
                << aggregate.mean(aggregate.recall10) << " | "
                << aggregate.mean(aggregate.ap10) << " | "
                << aggregate.mean(aggregate.time_ms) << " | "
+               << std::setprecision(1) << aggregate.mean(aggregate.candidates)
+               << std::setprecision(4) << " | "
                << aggregate.short_results << "/" << aggregate.count << " |\n";
     };
     write_row("Overall", summary.overall);
@@ -265,22 +260,88 @@ std::vector<MethodConfig> validation_configs(int database_size) {
     return configs;
 }
 
-// returns the configuration with the highest mAP@10 on the given set
-MethodConfig select_best(const std::vector<MethodConfig>& configs,
-                         const PreparedSet& data, int seed) {
-    MethodConfig best;
-    // below any possible score, so the first configuration always becomes the best
-    double best_score = -1.0;
-    for(const auto& config : configs) {
-        // evaluate this configuration on every query
-        const auto score = mean_ap(search_all(config, data, seed));
-        // keep the first configuration on ties
-        if(score > best_score) {
-            best = config;
-            best_score = score;
-        }
+// formats the parameters of a configuration with the names of the assignment's command line options
+std::string describe(const MethodConfig& config) {
+    std::ostringstream text;
+    if(config.method == "LSH")
+        text << "k=" << config.first << ", L=" << config.second
+             << ", w=" << config.third / 1000.0;
+    else if(config.method == "HYPERCUBE")
+        text << "kproj=" << config.first << ", M=" << config.second
+             << ", w=" << config.third / 1000.0 << ", probes=" << config.fourth;
+    else if(config.method == "IVFFLAT")
+        text << "kclusters=" << config.first << ", nprobe=" << config.second;
+    else if(config.method == "IVFPQ")
+        text << "kclusters=" << config.first << ", nprobe=" << config.second
+             << ", M=" << config.third << ", nbits=" << config.fourth;
+    else
+        text << "-";
+    return text.str();
+}
+
+// overall validation metrics of one configuration
+struct ValidationRow {
+    MethodConfig config;
+    Aggregate overall;
+};
+
+// configurations whose validation mAP@10 is at most this far below the best of their method count as
+// equally accurate, so the cheapest of them is selected
+// with the 23 validation queries, one query's AP changing by 0.23 already moves mAP@10 by 0.01
+constexpr double kMapTolerance = 0.01;
+
+// evaluates every configuration on the validation set
+std::vector<ValidationRow> evaluate_configs(const std::vector<MethodConfig>& configs,
+                                            const PreparedSet& data, int seed) {
+    std::vector<ValidationRow> rows;
+    rows.reserve(configs.size());
+    for(const auto& config : configs)
+        rows.push_back({config, summarize(search_all(config, data, seed)).overall});
+    return rows;
+}
+
+// returns the position of the selected row: among the rows within kMapTolerance of the best mAP@10,
+// the one with the fewest mean candidates, keeping the first in grid order on ties
+// the cost is a candidate count rather than the measured time, so the choice is reproducible
+std::size_t select_config(const std::vector<ValidationRow>& rows) {
+    if(rows.empty())
+        throw std::invalid_argument("no validation configurations to select from");
+    double best_map = 0.0;
+    for(const auto& row : rows)
+        best_map = std::max(best_map, row.overall.mean(row.overall.ap10));
+
+    std::size_t selected = rows.size();
+    for(std::size_t i = 0; i < rows.size(); ++i) {
+        const auto& overall = rows[i].overall;
+        // the small slack keeps rows exactly at the tolerance despite rounding
+        if(overall.mean(overall.ap10) < best_map - kMapTolerance - 1e-12)
+            continue;
+        if(selected == rows.size() ||
+           overall.mean(overall.candidates) <
+               rows[selected].overall.mean(rows[selected].overall.candidates))
+            selected = i;
     }
-    return best;
+    return selected;
+}
+
+// writes the validation results of one method, marking the selected configuration
+void write_validation_table(std::ofstream& output, const std::vector<ValidationRow>& rows,
+                            std::size_t selected) {
+    output << "| Parameters | Recall@5 | Recall@10 | mAP@10 | Mean query time (ms) "
+              "| Mean candidates | Queries with < 10 results | Selected |\n"
+              "|---|---:|---:|---:|---:|---:|---:|:---:|\n";
+    for(std::size_t i = 0; i < rows.size(); ++i) {
+        const auto& overall = rows[i].overall;
+        output << "| " << describe(rows[i].config) << " | "
+               << overall.mean(overall.recall5) << " | "
+               << overall.mean(overall.recall10) << " | "
+               << overall.mean(overall.ap10) << " | "
+               << overall.mean(overall.time_ms) << " | "
+               << std::setprecision(1) << overall.mean(overall.candidates)
+               << std::setprecision(4) << " | "
+               << overall.short_results << "/" << overall.count << " | "
+               << (i == selected ? "yes" : "") << " |\n";
+    }
 }
 
 }  // namespace
@@ -319,15 +380,23 @@ void ExperimentRunner::run(const std::string& output_path) {
         hp_path_, mir_path_, split_file_, "validation");
     const auto validation = prepare_set(validation_dataset,
                                         vocabulary_data.vocabulary, 10000);
-    // best configuration found for each method
+    // exact search on validation is the reference the approximate methods are compared against
+    const auto exact_validation = evaluate_configs({MethodConfig{"EXACT"}}, validation, seed_);
+    // validation results and selected configuration of each approximate method
+    std::map<std::string, std::vector<ValidationRow>> validation_rows;
     std::map<std::string, MethodConfig> best;
+    std::map<std::string, std::size_t> selected_row;
     for(const auto& method : {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"}) {
         // keep only the grid entries of the current method
         std::vector<MethodConfig> candidates;
         for(const auto& config : validation_configs(validation.hpatches_database.size()))
             if(config.method == method)
                 candidates.push_back(config);
-        best[method] = select_best(candidates, validation, seed_);
+        std::cout << "tuning " << method << " on " << candidates.size()
+                  << " validation configurations...\n";
+        validation_rows[method] = evaluate_configs(candidates, validation, seed_);
+        selected_row[method] = select_config(validation_rows[method]);
+        best[method] = validation_rows[method][selected_row[method]].config;
     }
 
     // step 3, write the report starting with the selected parameters
@@ -336,27 +405,32 @@ void ExperimentRunner::run(const std::string& output_path) {
         throw std::runtime_error("could not open experiment output: " + output_path);
     output << std::fixed << std::setprecision(4);
     output << "# Image-search experiment\n\n";
+    output << "Vocabulary size K=" << vocabulary_size_ << ", S=" << max_training_descriptors_
+           << ", seed=" << seed_ << ".\n\n";
     output << "Validation tuning uses D=10000 (" << validation.distractors.size()
-           << " usable MIRFlickr images) and selects each approximate "
-              "method by maximum mAP@10.\n\n";
+           << " usable MIRFlickr images, " << validation.queries.size()
+           << " queries). For each approximate method, the configurations whose mAP@10 is "
+              "within " << std::setprecision(2) << kMapTolerance << std::setprecision(4)
+           << " of the method's best are treated as equally accurate, and the one with the "
+              "fewest mean candidates (distance computations per query) is selected. The "
+              "candidate count is used instead of the measured time so that the selection is "
+              "reproducible.\n\n";
     output << "## Selected validation parameters\n\n"
-              "| Method | Parameters |\n|---|---|\n";
-    // print each method's parameters using the names of the assignment's command line options
+              "| Method | Parameters | Validation mAP@10 | Mean candidates |\n"
+              "|---|---|---:|---:|\n";
     for(const auto& [method, config] : best) {
-        output << "| " << method << " | ";
-        if(method == "LSH")
-            output << "k=" << config.first << ", L=" << config.second
-                   << ", w=" << config.third / 1000.0;
-        else if(method == "HYPERCUBE")
-            output << "kproj=" << config.first << ", M=" << config.second
-                   << ", w=" << config.third / 1000.0
-                   << ", probes=" << config.fourth;
-        else if(method == "IVFFLAT")
-            output << "kclusters=" << config.first << ", nprobe=" << config.second;
-        else
-            output << "kclusters=" << config.first << ", nprobe=" << config.second
-                   << ", M=" << config.third << ", nbits=" << config.fourth;
-        output << " |\n";
+        const auto& overall = validation_rows[method][selected_row[method]].overall;
+        output << "| " << method << " | " << describe(config) << " | "
+               << overall.mean(overall.ap10) << " | " << std::setprecision(1)
+               << overall.mean(overall.candidates) << std::setprecision(4) << " |\n";
+    }
+
+    output << "\n## Validation results\n\n";
+    output << "### EXACT (reference)\n\n";
+    write_validation_table(output, exact_validation, exact_validation.size());
+    for(const auto& method : {"LSH", "HYPERCUBE", "IVFFLAT", "IVFPQ"}) {
+        output << "\n### " << method << "\n\n";
+        write_validation_table(output, validation_rows[method], selected_row[method]);
     }
 
     // step 4, evaluate on the test set for each database size D, reusing the tuned parameters
