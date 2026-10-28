@@ -51,9 +51,9 @@ struct IVFPQSearch::Impl : DatabaseIndex {
             throw std::invalid_argument("IVFPQ subquantizers must divide vector dimension");
         width = database.front().size() / subquantizers;
 
-        auto coarse = clusterVectors(database, clusterCount, seed);
+        auto coarse = trainIVFClusters(database, clusterCount, seed);
         centers = std::move(coarse.centers);
-        // k-means already assigned each database vector to its nearest coarse centroid
+        // nearest coarse centroid of every database vector, sampled or not
         const std::vector<std::size_t> coarse_assignments = std::move(coarse.assignments);
         lists.resize(centers.size());
         for(std::size_t i = 0; i < database.size(); ++i) {

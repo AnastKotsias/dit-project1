@@ -4,6 +4,7 @@
 #include <map>
 #include <stdexcept>
 #include <cstdlib>
+#include <algorithm>
 #include <cmath>
 #include <set>
 #include <optional>
@@ -42,7 +43,7 @@ struct Args {
     int hyper_kproj = 10;
     // hypercube maximum number of vertices probed (-probes)
     int hyper_probes = 10;
-    int ivf_kclusters = -1;  // to dynamically calculate sqrt(n) later
+    int ivf_kclusters = -1;  // to dynamically calculate max(5, round(n^(1/4))) later
     int ivf_nprobe = -1;     // resolved after the database size is known
     int m_param = -1;   // to handle default 500 for hypercube or 16 for pq later
     // bits per PQ code, so 2^nbits codebook entries (-nbits)
@@ -396,10 +397,11 @@ int main(int argc, char** argv) {
 
     // fill in IVF defaults that depend on the database size, which was unknown during parsing
     if(args.method == "ivfflat" || args.method == "ivfpq") {
-        // default number of clusters is ceil(sqrt(n))
+        // default number of clusters is max(5, round(n^(1/4)))
+        // the ceil(sqrt(n)) default of the assignment was withdrawn, sqrt(n) is now the k-means sample size
         if(args.ivf_kclusters == -1) {
-            args.ivf_kclusters = static_cast<int>(
-                std::ceil(std::sqrt(static_cast<double>(n_database))));
+            args.ivf_kclusters = std::max(5, static_cast<int>(
+                std::lround(std::pow(static_cast<double>(n_database), 0.25))));
         }
         // default number of probed clusters is 5
         if(args.ivf_nprobe == -1) {

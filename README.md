@@ -483,7 +483,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `clusterVectors`, which runs the shared k-means of the k-means module on BoVW vectors for IVFFlat and IVFPQ, the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance`. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `computeEuclideanDistance`. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
@@ -619,12 +619,21 @@ database vectors plus the selected usable MIRFlickr vectors. For IVFFlat and
 IVFPQ:
 
 ```text
-default kclusters = ceil(sqrt(n_database))
+default kclusters = max(5, round(n_database^(1/4)))
 default nprobe    = 5
+k-means sample    = ceil(sqrt(n_database)) vectors
 ```
 
 These values are resolved after invalid images have been removed, so they are
 based on the actual index size rather than the nominal requested size.
+
+The assignment's `kclusters` default of ⌈√n⌉ was withdrawn by the professor in
+the course Q&A: ⌈√n⌉ is the size of the random k-means training sample, not
+the number of clusters, and the number of clusters should be smaller, in the
+range 5 to n^(1/4), chosen on the validation set. The default
+`max(5, round(n^(1/4)))` gives 6, 8, 10, and 13 clusters for the nominal
+database sizes 1115, 5115, 10115, and 25115. The default `nprobe=5` is the
+assignment's; with 5 or 6 clusters it probes most or all of the lists.
 
 ## Command-line usage
 
@@ -691,8 +700,9 @@ All preprocessing is done once per run:
 - The first 25000 usable MIRFlickr images are encoded once. Validation and
   every test `D` use the first `D` of them, which are exactly the first `D`
   usable images in ascending order, as the assignment requires.
-- An IVF index is trained once per prepared database and reused for every
-  `nprobe` value (`withProbes`), since `nprobe` only affects the search.
+- An IVF index is trained once per prepared database and `kclusters` value and
+  reused for every `nprobe` value (`withProbes`), since `nprobe` only affects
+  the search.
 
 The vocabulary is selected with the same kind of rule as the method
 parameters: the smallest `K` whose exact-search validation mAP@10 is within
@@ -707,8 +717,16 @@ trade-off are varied, the others are kept at fixed values):
 |---|---|---|
 | LSH | `w` ∈ {0.01, 0.025, 0.05, 0.1}, `L` ∈ {3, 5, 7, 9} | `k=4` |
 | Hypercube | `M` ∈ {250, 500, 1000, 2000}, `probes` ∈ {5, 10, 20, 40} | `kproj=10`, `w=0.05` |
-| IVFFlat | `nprobe` ∈ {1, 2, 5, 10, 20} | `kclusters=⌈√n⌉` |
-| IVFPQ | `nprobe` ∈ {1, 2, 5, 10, 20} | `kclusters=⌈√n⌉`, `M=16`, `nbits=8` |
+| IVFFlat | `kclusters` ∈ {5, 6, 8, 10}, `nprobe` ∈ {1, 2, 3, 5} | - |
+| IVFPQ | `kclusters` ∈ {5, 6, 8, 10}, `nprobe` ∈ {1, 2, 3, 5} | `M=16`, `nbits=8` |
+
+The `kclusters` values cover the professor's range of 5 to n^(1/4), about 10
+for the validation database of 10115 vectors, and every `nprobe` is at most the
+smallest `kclusters`. The selected configuration, `kclusters` included, is
+used unchanged for every test `D`, since the test parameters are the ones
+chosen on validation. The k-means sample still grows with the database
+(⌈√n⌉ vectors), and at `D=1000` (n^(1/4) ≈ 5.8) a selected `kclusters` above 6
+lies outside that range.
 
 Selection rule: for each method, every configuration whose validation mAP@10
 is within 0.01 of that method's best counts as equally accurate, and among

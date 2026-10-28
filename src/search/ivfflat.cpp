@@ -11,7 +11,7 @@ using namespace detail;
 // IVFFlatSearch class implementation
 // IVFFlat index, which keeps full vectors in one inverted list per k-means cluster
 struct IVFFlatSearch::Impl : DatabaseIndex {
-    // cluster centers trained on the database vectors
+    // cluster centers trained on a random sample of the database vectors
     std::vector<Vector> centers;
     // database indices belonging to each cluster
     std::vector<std::vector<std::size_t>> lists;
@@ -19,10 +19,10 @@ struct IVFFlatSearch::Impl : DatabaseIndex {
     // Constructor to initialize the IVFFlat index
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int seed)
             : DatabaseIndex{db, names} {
-        auto clustering = clusterVectors(database, clusterCount, seed);
+        auto clustering = trainIVFClusters(database, clusterCount, seed);
         centers = std::move(clustering.centers);
 
-        // Create inverted lists for each cluster center, k-means already found each vector's nearest center
+        // Create inverted lists for each cluster center, every database vector was assigned to its nearest center
         lists.resize(centers.size());
         for(std::size_t i = 0; i < database.size(); ++i) {
             lists[clustering.assignments[i]].push_back(i);

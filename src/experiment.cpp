@@ -270,10 +270,7 @@ void write_summary(std::ostream& output, const Summary& summary) {
 }
 
 // lists the parameter grid to try on the validation set for every approximate method
-std::vector<MethodConfig> validation_configs(int database_size) {
-    // default number of clusters is ceil(sqrt(n)), where n is the database size
-    const int clusters = static_cast<int>(
-        std::ceil(std::sqrt(static_cast<double>(database_size))));
+std::vector<MethodConfig> validation_configs() {
     std::vector<MethodConfig> configs;
     // LSH with k = 4, trying several window widths and table counts
     for(const int width : {10, 25, 50, 100}) // 0.01, 0.025, 0.05, 0.1
@@ -283,12 +280,17 @@ std::vector<MethodConfig> validation_configs(int database_size) {
     for(const int max_candidates : {250, 500, 1000, 2000})
         for(const int probes : {5, 10, 20, 40})
             configs.push_back({"HYPERCUBE", 10, max_candidates, 50, probes});
-    // IVFFlat trying several probe counts
-    for(const int probes : {1, 2, 5, 10, 20})
-        configs.push_back({"IVFFLAT", clusters, probes, 0, 0});
-    // IVFPQ with M = 16 and nbits = 8, trying several probe counts
-    for(const int probes : {1, 2, 5, 10, 20})
-        configs.push_back({"IVFPQ", clusters, probes, 16, 8});
+    // IVF cluster counts from the professor's range of 5 to n^(1/4), about 10 for the validation database,
+    // every nprobe is at most the smallest cluster count, and kclusters=5 with nprobe=5 probes every list
+    // kclusters is the outer loop, so each IVF index is trained once and reused for its nprobe values
+    // IVFFlat trying several cluster and probe counts
+    for(const int clusters : {5, 6, 8, 10})
+        for(const int probes : {1, 2, 3, 5})
+            configs.push_back({"IVFFLAT", clusters, probes, 0, 0});
+    // IVFPQ with M = 16 and nbits = 8, trying several cluster and probe counts
+    for(const int clusters : {5, 6, 8, 10})
+        for(const int probes : {1, 2, 3, 5})
+            configs.push_back({"IVFPQ", clusters, probes, 16, 8});
     return configs;
 }
 
@@ -400,7 +402,7 @@ Aggregate study_vocabulary(std::ostream& output, int vocabulary_size, std::size_
     for(const auto& method : kApproximateMethods) {
         // keep only the grid entries of the current method
         std::vector<MethodConfig> candidates;
-        for(const auto& config : validation_configs(validation.hpatches_database.size()))
+        for(const auto& config : validation_configs())
             if(config.method == method)
                 candidates.push_back(config);
         std::cout << "K=" << vocabulary_size << ": tuning " << method << " on "

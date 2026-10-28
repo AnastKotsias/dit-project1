@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <numeric>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <unordered_set>
@@ -45,32 +47,46 @@ std::vector<std::size_t> nearestCenters(const Vector& query, const std::vector<V
     return result;
 }
 
-// runs the shared k-means on the points, converting them to and from the row-major Matrix it works on
-Clustering clusterVectors(const std::vector<Vector>& points, int requested, int seed) {
+// IVF build step of the lecture: runs the shared k-means on a random sample X' of ceil(sqrt(n)) points,
+// then assigns every point, the sampled ones included, to its nearest center, so no point is left out of the lists
+Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, int seed) {
     // nothing to cluster
     if(points.empty() || requested <= 0)
         return {};
-
-    // copy the points into one contiguous matrix
-    Matrix<double> matrix(points.size(), points.front().size());
-    for(std::size_t i = 0; i < points.size(); ++i) {
-        if(points[i].size() != matrix.cols)
+    const std::size_t dim = points.front().size();
+    for(const auto& point : points) {
+        if(point.size() != dim)
             throw std::invalid_argument("clustered vectors have inconsistent dimensions");
-        std::copy(points[i].begin(), points[i].end(), matrix.row(i));
     }
 
-    // Ensure we don't request more clusters than available points
-    const std::size_t k = std::min(static_cast<std::size_t>(requested), points.size());
-    auto result = image_search::kmeans(matrix, k, seed);
+    // draw the sample with the seeded generator, as the first ceil(sqrt(n)) entries of a shuffled index list
+    const auto sampleSize = static_cast<std::size_t>(
+        std::ceil(std::sqrt(static_cast<double>(points.size()))));
+    std::vector<std::size_t> order(points.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::mt19937 rng(seed);
+    std::shuffle(order.begin(), order.end(), rng);
+
+    // copy the sampled points into one contiguous matrix, the row-major form k-means works on
+    Matrix<double> sample(sampleSize, dim);
+    for(std::size_t s = 0; s < sampleSize; ++s)
+        std::copy(points[order[s]].begin(), points[order[s]].end(), sample.row(s));
+
+    // Ensure we don't request more clusters than sampled points
+    const std::size_t k = std::min(static_cast<std::size_t>(requested), sampleSize);
+    const auto centers = image_search::kmeans(sample, k, seed).centers;
 
     // copy the centers back into one vector per center
     Clustering clustering;
-    clustering.centers.reserve(result.centers.rows);
-    for(std::size_t c = 0; c < result.centers.rows; ++c) {
-        const double* center = result.centers.row(c);
-        clustering.centers.emplace_back(center, center + result.centers.cols);
+    clustering.centers.reserve(centers.rows);
+    for(std::size_t c = 0; c < centers.rows; ++c) {
+        const double* center = centers.row(c);
+        clustering.centers.emplace_back(center, center + centers.cols);
     }
-    clustering.assignments = std::move(result.assignments);
+    // assign all n points, not only the sample, to their nearest center
+    clustering.assignments.reserve(points.size());
+    for(const auto& point : points)
+        clustering.assignments.push_back(nearest_center(point.data(), centers));
     return clustering;
 }
 

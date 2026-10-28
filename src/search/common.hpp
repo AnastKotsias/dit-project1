@@ -32,9 +32,10 @@ struct Clustering {
     std::vector<std::size_t> assignments;
 };
 
-// runs the shared k-means of kmeans.hpp on the points, used for the IVF coarse clusters and PQ codebooks
-// the number of clusters is capped at the number of points
-Clustering clusterVectors(const std::vector<Vector>& points, int requested, int seed);
+// trains the IVF coarse clusters of IVFFlat and IVFPQ: the shared k-means of kmeans.hpp runs on a seeded
+// random sample of ceil(sqrt(n)) points, then all n points are assigned to their nearest center
+// the number of clusters is capped at the sample size
+Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, int seed);
 
 // Checks that the query has the database dimension and only finite values, throws otherwise
 void validateQuery(const std::vector<Vector>& database, const Vector& query);
