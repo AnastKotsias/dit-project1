@@ -486,7 +486,7 @@ method under [`src/search/`](src/search/):
 
 | File | Contents |
 |---|---|
-| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size, which `main.cpp` reports with a warning), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks candidates by exact distance, skipping duplicate candidates with a per-query flag array, and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `ivfTrainingSampleSize`, which returns the sample size ⌈√n⌉. |
+| `common.hpp` / `common.cpp` | Private helpers shared by all methods, in the `image_search::detail` namespace: squared Euclidean distance (a wrapper over the k-means module's `squared_distance`, so exact distances in every method and IVFPQ's lookup tables use the same four-accumulator loop and query times are comparable), nearest-center lookup, `trainIVFClusters`, which builds the coarse clusters of IVFFlat and IVFPQ as in the lecture's IVF build step (the shared k-means runs on a seeded random sample X' of ⌈√n⌉ BoVW vectors, then all n vectors, the sampled ones included, are assigned to their nearest center, so no database image is left out of the inverted lists; `kclusters` is capped at the sample size, which `main.cpp` reports with a warning), the `DatabaseIndex` base that validates the database, `buildResult`, which ranks distinct candidates by exact distance at a cost that depends only on their number, not on the database size (only LSH can return a point more than once, from several tables, and it removes the repeats itself by sorting its candidate list), and `buildRankedResult`, which takes an already-ranked list (IVFPQ's ADC ranking), stops the query timer, and computes the metrics. Also defines the public `ivfTrainingSampleSize`, which returns the sample size ⌈√n⌉. |
 | `exact.cpp` | `ExactSearch` |
 | `lsh.cpp` | `LSHSearch` |
 | `hypercube.cpp` | `HypercubeSearch` |
@@ -530,8 +530,9 @@ This module includes the implementation of **Exact Search** (`ExactSearch` class
   Average query time: 1.0000
   ```
 
-  When an approximate method returns fewer than ten candidates, only the filled ranks are printed
-  (for example `Rank-1` to `Rank-4`), and the missing positions count as non-relevant in the metrics.
+  Every query block has `Rank-1` to `Rank-10`. When an approximate method returns fewer than ten
+  candidates, the positions it did not fill are printed as `-` (for example `Rank-5: -` to
+  `Rank-10: -` after four results), and they count as non-relevant in the metrics.
 
 ## `src/main.cpp`
 

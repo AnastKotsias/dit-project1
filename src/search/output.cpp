@@ -3,8 +3,16 @@
 #include <fstream>
 #include <iomanip>
 #include <stdexcept>
+#include <string>
 
 namespace image_search {
+// helpers below are private to this translation unit
+namespace {
+
+// printed for a rank the index did not fill, it can never be an image identifier
+const std::string kMissingRank = "-";
+
+}  // namespace
 
 // writes per-query results and the aggregate means in the output format required by the assignment
 void evaluateAndWriteResults(const std::string& outputPath, const std::string& methodName, const std::vector<SearchResult>& results) {
@@ -33,9 +41,11 @@ void evaluateAndWriteResults(const std::string& outputPath, const std::string& m
     output << methodName << "\n";
     for(const auto& result : results) {
         output << "Query: " << result.query_id << "\n";
-        // only the positions the index filled are printed, missing positions count as non-relevant
-        for(std::size_t i = 0; i < result.top_10_ids.size(); ++i)
-            output << "Rank-" << i + 1 << ": " << result.top_10_ids[i] << "\n";
+        // every block has Rank-1 to Rank-10 as in the required format, positions the index did not fill
+        // are printed as kMissingRank and count as non-relevant in the metrics
+        for(std::size_t i = 0; i < 10; ++i)
+            output << "Rank-" << i + 1 << ": "
+                   << (i < result.top_10_ids.size() ? result.top_10_ids[i] : kMissingRank) << "\n";
         output << "Recall@5: " << result.recall_5 << "\n"
                << "Recall@10: " << result.recall_10 << "\n"
                << "AP@10: " << result.ap_10 << "\n\n";

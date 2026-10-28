@@ -1,5 +1,6 @@
 #include "common.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -92,7 +93,7 @@ struct LSHSearch::Impl : DatabaseIndex {
         return combined;
     }
 
-    // collects the database indices that share a bucket with the query in at least one table
+    // collects the distinct database indices that share a bucket with the query in at least one table
     std::vector<std::size_t> candidates(const Vector& query) const {
         std::vector<std::size_t> result;
         for(int t = 0; t < tables; ++t) {
@@ -101,6 +102,10 @@ struct LSHSearch::Impl : DatabaseIndex {
             if(found != buckets[t].end())
                 result.insert(result.end(), found->second.begin(), found->second.end());
         }
+        // a point that shares the query's bucket in several tables is listed once per table,
+        // sorting the candidates removes the repeats at a cost that depends only on their number
+        std::sort(result.begin(), result.end());
+        result.erase(std::unique(result.begin(), result.end()), result.end());
         return result;
     }
 };

@@ -89,22 +89,19 @@ Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, in
     return clustering;
 }
 
-// Common result-building function used by Exact, LSH, Hypercube, IVFFlat, and IVFPQ search
+// Common result-building function used by Exact, LSH, Hypercube and IVFFlat search
 // the query has already been checked by validateQuery in the calling search
+// the candidates are distinct, so the per-query cost depends only on their number and not on the
+// database size, which keeps the query times of the approximate methods free of an O(n) term
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start) {
     // candidates scored by their distance to the query
     std::vector<ScoredId> ranked;
     ranked.reserve(candidates.size());
-    // seen[i] marks database vector i as already scored, so duplicates are skipped
-    // a flag array avoids the allocation and hashing a set would cost per candidate
-    std::vector<char> seen(database.size(), 0);
     // Rank only candidates returned by the index. Approximate methods must not
     // silently turn an empty candidate set into an exact search.
     for(const auto index : candidates) {
-        if(index < database.size() && !seen[index]) {
-            seen[index] = 1;
-            ranked.emplace_back(squaredEuclideanDistance(query, database[index]), index);
-        }
+        assert(index < database.size());
+        ranked.emplace_back(squaredEuclideanDistance(query, database[index]), index);
     }
 
     // Select the top 10 among the candidates actually returned by the index.
@@ -115,7 +112,7 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
     for(std::size_t i = 0; i < limit; ++i) {
         order.push_back(ranked[i].second);
     }
-    // every distinct valid candidate cost one exact distance computation
+    // every candidate cost one exact distance computation
     return buildRankedResult(ids, order, ranked.size(), queryId, sequenceId, start);
 }
 
