@@ -11,25 +11,28 @@
 #include <unordered_map>
 
 namespace image_search {
-// shared helpers and aliases from common.hpp
 using namespace detail;
 
-// hypercube index, where each of the d' projections contributes one bit of the bucket key
+// hypercube index: each of the d' projections h_i(p) = floor((p.v + t) / w) contributes one bit, so a
+// point maps to a vertex of the d'-dimensional cube, which is its bucket
 struct HypercubeSearch::Impl : DatabaseIndex {
-    int projections;        // Number of projections
-    int maxCandidates;      // Maximum number of candidates to consider
-    int probes;             // Number of probes to perform in the hypercube
-    double width;           // Width parameter for the hypercube projections
-    // random gaussian projection vector of each dimension of the cube
+    // dimension d' of the cube
+    int projections;
+    // candidate budget M
+    int maxCandidates;
+    // maximum number of vertices visited per query
+    int probes;
+    // window width w
+    double width;
+    // Gaussian projection vector v of each dimension of the cube
     std::vector<Vector> vectors;
-    // random shift of each projection
+    // shift t of each projection, in [0, w)
     std::vector<double> offsets;
-    // seed mixed into the bucket-to-bit mapping so different seeds give different cubes
+    // seed of the window-number-to-bit mapping, so different seeds give different cubes
     std::uint64_t bitSeed;
-    // maps a vertex of the cube, encoded as an integer, to the database indices stored in it
+    // maps a vertex, encoded as a d'-bit integer, to the database indices stored in it
     std::unordered_map<int, std::vector<std::size_t>> buckets;
 
-    // Constructor to initialize the Hypercube index with database vectors, identifiers, and hypercube parameters
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int projectionCount, double widthValue, int maxCount, int probeCount, int seed)
             : DatabaseIndex{db, names}, projections(projectionCount), maxCandidates(maxCount),
               probes(probeCount), width(widthValue),
@@ -43,7 +46,7 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         // the window width divides the projection, so it must be positive and finite
         if(width <= 0.0 || !std::isfinite(width))
             throw std::invalid_argument("Hypercube width must be finite and positive");
-        // the candidate budget M and the vertex budget must allow at least one candidate
+        // both budgets must allow at least one candidate
         if(maxCandidates <= 0)
             throw std::invalid_argument("Hypercube M must be strictly positive");
         if(probes <= 0)
@@ -54,19 +57,18 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         std::uniform_real_distribution<double> offset(0.0, width);
         vectors.resize(projections, Vector(database.front().size()));
 
-        // draw the gaussian projection vector and the shift of each dimension
         for(int i = 0; i < projections; ++i) {
             for(double& value : vectors[i])
                 value = normal(rng);
             offsets[i] = offset(rng);
         }
 
-        // place every database vector into the vertex it hashes to
+        // every database vector goes into its vertex
         for(std::size_t i = 0; i < database.size(); ++i)
             buckets[hash(database[i])].push_back(i);
     }
 
-    // pseudo-randomly maps an integer bucket number to 0 or 1 using a seeded integer mixing function
+    // pseudo-randomly maps the window number of a projection to 0 or 1 with a seeded integer mixing function
     int mapToBit(int projection, std::int64_t bucket) const {
         std::uint64_t value = bitSeed ^
             (static_cast<std::uint64_t>(projection) +
@@ -81,23 +83,20 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         return static_cast<int>(value & 1U);
     }
 
-    // computes the vertex of the cube for a point as a d'-bit integer
+    // vertex of a point as a d'-bit integer, bit i comes from projection i
     int hash(const Vector& point) const {
         int value = 0;
         for(int i = 0; i < projections; ++i) {
-            // projection of the point onto the i-th random vector
             const double dot = std::inner_product(point.begin(), point.end(), vectors[i].begin(), 0.0);
-            // window number of the shifted projection
             const std::int64_t bucket = windowIndex(dot + offsets[i], width);
-            // set bit i when the window number maps to 1
             if(mapToBit(i, bucket) != 0)
                 value |= (1 << i);
         }
         return value;
     }
 
-    // Appends to keys the vertices at Hamming distance flips from queryHash in ascending order, until keys holds limit vertices
-    // bit is the highest position still to decide and prefix holds the bits already chosen above it
+    // appends to keys the vertices at Hamming distance flips from queryHash, in ascending order, until keys holds limit vertices
+    // recursion over the bits from the highest down: bit is the position still to decide, prefix the bits chosen above it
     void verticesAtDistance(int queryHash, int bit, int flips, int prefix, std::size_t limit, std::vector<int>& keys) const {
         if(keys.size() >= limit)
             return;
@@ -116,28 +115,25 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         }
     }
 
-    // Function to find candidate vectors for a given query
+    // vectors of the first `probes` vertices around the query, at most maxCandidates of them
     std::vector<std::size_t> candidates(const Vector& query) const {
-        // Compute the hash value for the query vector
         const int queryHash = hash(query);
 
-        // The first probes vertices in increasing Hamming distance from the query vertex, ties in ascending vertex order.
-        // They are generated one distance at a time instead of sorting all 2^d' vertices, so the cost grows with probes rather than 2^d'.
+        // the vertices are visited in increasing Hamming distance from the query vertex, ties in ascending vertex order
+        // generating them one distance at a time instead of sorting all 2^d' makes the cost grow with probes, not 2^d'
         const std::size_t limit = std::min(static_cast<std::size_t>(probes), std::size_t{1} << projections);
         std::vector<int> keys;
         keys.reserve(limit);
         for(int flips = 0; flips <= projections && keys.size() < limit; ++flips)
             verticesAtDistance(queryHash, projections - 1, flips, 0, limit, keys);
 
-        // candidates in the order the vertices are visited
         std::vector<std::size_t> result;
-        // collect candidates from the probed vertices' buckets
         for(std::size_t i = 0; i < keys.size(); ++i) {
             const auto found = buckets.find(keys[i]);
             if(found != buckets.end()) {
                 for(const auto index : found->second) {
                     result.push_back(index);
-                    // stop early once the candidate budget M is reached
+                    // stop once the candidate budget M is reached
                     if(static_cast<int>(result.size()) >= maxCandidates)
                         return result;
                 }
@@ -147,11 +143,9 @@ struct HypercubeSearch::Impl : DatabaseIndex {
     }
 };
 
-// HypercubeSearch constructor
 HypercubeSearch::HypercubeSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int projections, double width, int maxCandidates, int probes, int seed)
     : impl(std::make_shared<Impl>(db, ids, projections, width, maxCandidates, probes, seed)) {}
 
-// HypercubeSearch search function
 SearchResult HypercubeSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     const auto start = std::chrono::steady_clock::now();
     // checked before hashing, since a non-finite query cannot be mapped to a vertex

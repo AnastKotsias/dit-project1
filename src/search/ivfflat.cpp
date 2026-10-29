@@ -6,18 +6,15 @@
 #include <utility>
 
 namespace image_search {
-// shared helpers and aliases from common.hpp
 using namespace detail;
 
-// IVFFlatSearch class implementation
-// IVFFlat index, which keeps full vectors in one inverted list per k-means cluster
+// IVFFlat index: the full vectors are kept in one inverted list per k-means cluster
 struct IVFFlatSearch::Impl : DatabaseIndex {
-    // cluster centers trained on a random sample of the database vectors
+    // coarse centers, trained on a random sample of the database vectors
     std::vector<Vector> centers;
     // database indices belonging to each cluster
     std::vector<std::vector<std::size_t>> lists;
 
-    // Constructor to initialize the IVFFlat index
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int seed)
             : DatabaseIndex{db, names} {
         if(clusterCount <= 0)
@@ -25,26 +22,23 @@ struct IVFFlatSearch::Impl : DatabaseIndex {
         auto clustering = trainIVFClusters(database, clusterCount, seed);
         centers = std::move(clustering.centers);
 
-        // Create inverted lists for each cluster center, every database vector was assigned to its nearest center
+        // all database vectors, not only the training sample, are in the list of their nearest center
         lists.resize(centers.size());
         for(std::size_t i = 0; i < database.size(); ++i) {
             lists[clustering.assignments[i]].push_back(i);
         }
     }
 
-    // Function to find candidate vectors for a given query
+    // vectors of the `probes` clusters nearest to the query
     std::vector<std::size_t> candidates(const Vector& query, int probes) const {
-        // the probes closest clusters to the query
         const auto selected = nearestCenters(query, centers, probes);
         std::vector<std::size_t> result;
-        // every vector of those clusters is a candidate
         for(const auto center : selected)
             result.insert(result.end(), lists[center].begin(), lists[center].end());
         return result;
     }
 };
 
-// IVFFlatSearch constructor
 IVFFlatSearch::IVFFlatSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int clusters, int probes, int seed)
     : impl(std::make_shared<Impl>(db, ids, clusters, seed)), probes(checkedProbes(probes)) {}
 
@@ -55,7 +49,6 @@ IVFFlatSearch IVFFlatSearch::withProbes(int probe_count) const {
     return copy;
 }
 
-// IVFFlatSearch search function
 SearchResult IVFFlatSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     const auto start = std::chrono::steady_clock::now();
     validateQuery(impl->database, query);

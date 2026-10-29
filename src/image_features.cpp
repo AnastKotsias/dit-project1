@@ -11,7 +11,6 @@
 
 namespace image_search {
 
-// maps each status to a human readable description
 const char* sift_extraction_status_name(SiftExtractionStatus status) {
     switch(status) {
     case SiftExtractionStatus::Success:
@@ -21,11 +20,10 @@ const char* sift_extraction_status_name(SiftExtractionStatus status) {
     case SiftExtractionStatus::NoDescriptors:
         return "no SIFT descriptors";
     }
-    // only reached if an invalid enum value is passed in
+    // only reached for an invalid enum value
     return "unknown extraction status";
 }
 
-// loads an image as grayscale and computes its SIFT descriptors
 SiftExtractionResult extract_sift_descriptors(
     const std::filesystem::path& image_path) {
     // imread returns an empty matrix instead of throwing when loading fails
@@ -35,30 +33,28 @@ SiftExtractionResult extract_sift_descriptors(
         return {{}, SiftExtractionStatus::ImageUnreadable};
     }
 
-    // default OpenCV SIFT parameters, each descriptor has 128 values
+    // default SIFT parameters, which give 128 values per descriptor
     const auto sift = cv::SIFT::create();
-    // keypoints are required by the API but not needed afterwards
+    // the API requires the keypoints as output, but only the descriptors are used
     std::vector<cv::KeyPoint> keypoints;
-    // output matrix with one descriptor per row
     cv::Mat descriptors;
 
-    // cv::noArray() means no mask is used, so keypoints are detected over the whole image
+    // no mask, so keypoints are detected over the whole image
     sift->detectAndCompute(image, cv::noArray(), keypoints, descriptors);
 
-    // images without any detected keypoint, such as blank ones, yield no descriptors
+    // an image without keypoints, such as a blank one, yields no descriptors
     if(descriptors.empty()) {
         return {{}, SiftExtractionStatus::NoDescriptors};
     }
-    // OpenCV SIFT always produces 32-bit float descriptors
     if(descriptors.type() != CV_32F) {
         throw std::runtime_error("SIFT returned descriptors that are not 32-bit floats");
     }
 
-    // copy the descriptors out of the cv::Mat, so the rest of the program does not depend on OpenCV
+    // copy into a DescriptorMatrix, so the rest of the program does not depend on OpenCV
     DescriptorMatrix result(static_cast<std::size_t>(descriptors.rows),
                             static_cast<std::size_t>(descriptors.cols));
     for(std::size_t r = 0; r < result.rows; ++r) {
-        // rows are copied one by one, since a cv::Mat is not guaranteed to be continuous
+        // row by row, since a cv::Mat is not guaranteed to be continuous
         const float* source = descriptors.ptr<float>(static_cast<int>(r));
         std::copy(source, source + result.cols, result.row(r));
     }
@@ -66,33 +62,27 @@ SiftExtractionResult extract_sift_descriptors(
     return {std::move(result), SiftExtractionStatus::Success};
 }
 
-// randomly keeps at most max_features descriptor rows, the S limit per training image
 DescriptorMatrix sample_training_descriptors(
     const DescriptorMatrix& descriptors, int max_features, std::mt19937& rng) {
-
-    // a non-positive limit would make the sample meaningless
     if(max_features <= 0) {
         throw std::invalid_argument("max_features must be strictly positive");
     }
-    // callers are expected to skip images that have no descriptors
+    // callers skip images without descriptors, so an empty input is a programming error
     if(descriptors.empty()) {
         throw std::invalid_argument("descriptors must not be empty");
     }
 
     const auto limit = static_cast<std::size_t>(max_features);
-    // images with at most S descriptors keep all of them
     if(descriptors.rows <= limit) {
         return descriptors;
     }
 
-    // shuffle all row indices and take the first max_features, which samples without replacement
+    // shuffling all row indices and taking the first limit of them samples without replacement
     std::vector<std::size_t> indices(descriptors.rows);
     std::iota(indices.begin(), indices.end(), 0);
     std::shuffle(indices.begin(), indices.end(), rng);
 
-    // output keeps the same column count as the input
     DescriptorMatrix sampled(limit, descriptors.cols);
-    // copy the selected rows so the result does not share memory with the input
     for(std::size_t i = 0; i < limit; ++i) {
         const float* source = descriptors.row(indices[i]);
         std::copy(source, source + descriptors.cols, sampled.row(i));

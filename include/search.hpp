@@ -8,6 +8,13 @@
 
 namespace image_search {
 
+// every search class takes the BoVW vector of each database image and its identifier
+// a constructor throws if the database is empty, the vectors have inconsistent dimensions or non-finite
+// values, an identifier is empty, or a parameter is out of range (the ranges are given per class)
+// search() takes the query vector, its identifier and the sequence it belongs to, which defines its
+// five relevant images; it throws if the query has the wrong dimension or non-finite values
+// copying a search object shares the same index, and all randomness derives from the seed
+
 // largest hypercube dimension d', since a vertex is stored as an int key and probes are bounded by 2^d'
 constexpr int kMaxHypercubeProjections = 20;
 // largest IVFPQ code size in bits, since every code is stored in a uint16_t
@@ -16,7 +23,7 @@ constexpr int kMaxPQBits = 16;
 // outcome of one query: the returned ranking, its quality metrics and the time it took
 struct SearchResult {
     std::string query_id;
-    // fewer than 10 if the index returned fewer candidates
+    // fewer than 10 if the index returned fewer candidates, the missing ranks count as non-relevant
     std::vector<std::string> top_10_ids;
     double recall_5 = 0.0;
     double recall_10 = 0.0;
@@ -28,57 +35,56 @@ struct SearchResult {
     std::size_t candidates_examined = 0;
 };
 
-// number of database vectors the IVF k-means is trained on, ceil(sqrt(n)) for a database of n vectors
+// number of vectors the IVF k-means is trained on, ceil(sqrt(n)) for a database of n vectors
 // it is also the largest number of IVF clusters that can be formed, larger requests are capped to it
 std::size_t ivfTrainingSampleSize(std::size_t database_size);
 
-// exhaustive search that compares the query against every database vector
+// exhaustive search that compares the query with every database vector
 class ExactSearch {
 private:
-    // implementation details are hidden in src/search/ (pimpl idiom)
+    // the implementation is hidden in src/search/ (pimpl idiom)
     struct Impl;
-    // shared pointer keeps the class cheap to copy while sharing one index
     std::shared_ptr<Impl> impl;
 
 public:
-    // Initialization of the ExactSearch class with database BoW vectors and their identifiers
     ExactSearch(const std::vector<std::vector<double>>& db_bows,
                 const std::vector<std::string>& db_ids);
 
-    // returns the exact top 10 neighbours of the query together with its metrics
+    // the exact top 10 neighbours of the query, ranked by Euclidean distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
-// locality sensitive hashing with L hash tables, each using k hash functions of width w
+// locality sensitive hashing with `tables` hash tables, each combining k hash functions of window width w
+// k, tables and width must be positive and width finite
 class LSHSearch {
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;
-    
+
 public:
-    // Initialization of the LSHSearch class with database BoW vectors, their identifiers, and LSH parameters
     LSHSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int k, int tables, double width, int seed = 1);
-    
-    // returns the approximate top 10 neighbours found among the index candidates, plus metrics
+
+    // the top 10 among the vectors sharing a bucket with the query in any table, ranked by Euclidean distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
-// random projection to a hypercube, where each vertex of the cube is a bucket
+// random projection to a hypercube of `projections` dimensions, where each vertex is a bucket
+// a query checks at most `probes` vertices and `max_candidates` vectors
+// projections must be in 1..kMaxHypercubeProjections, the others positive and width finite
 class HypercubeSearch {
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;
-    
-public:
-    // Initialization of the HypercubeSearch class with database BoW vectors, their identifiers, and hypercube parameters
-    HypercubeSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int projections, double width, int max_candidates, int probes, int seed = 1);
-    
-    // returns the approximate top 10 neighbours found among the index candidates, plus metrics
-    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 
+public:
+    HypercubeSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int projections, double width, int max_candidates, int probes, int seed = 1);
+
+    // the top 10 among the vectors of the probed vertices, ranked by Euclidean distance
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
-// inverted file index that stores full vectors in the lists of their nearest k-means cluster
+// inverted file index that stores the full vectors in the lists of their nearest k-means cluster
+// clusters and probes must be positive, clusters is capped at ivfTrainingSampleSize
 class IVFFlatSearch {
 private:
     struct Impl;
@@ -87,38 +93,37 @@ private:
     int probes;
 
 public:
-    // Initialization of the IVFFlatSearch class with database BoW vectors, their identifiers, and IVF parameters
     IVFFlatSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int seed = 1);
 
-    // returns a copy that shares the trained index but searches the given number of clusters
+    // a copy that shares the trained index but searches the given number of clusters
     IVFFlatSearch withProbes(int probe_count) const;
-    
-    // returns the approximate top 10 neighbours found among the index candidates, plus metrics
-    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 
+    // the top 10 among the vectors of the `probes` nearest clusters, ranked by Euclidean distance
+    SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
-// inverted file index that stores product-quantized residuals and ranks candidates by their
-// asymmetric distance (ADC) to the codes, without reranking by exact distance
+// inverted file index that stores each vector as the product-quantized residual from its cluster center
+// subquantizers (M) must divide the vector dimension, bits must be in 1..kMaxPQBits (2^bits centroids
+// per subspace), clusters and probes must be positive, clusters is capped at ivfTrainingSampleSize
 class IVFPQSearch {
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;
-    // number of nearest clusters searched per query, kept outside Impl since it does not affect training
     int probes;
 
 public:
-    // Initialization of the IVFPQSearch class with database BoW vectors, their identifiers, and IVFPQ parameters
     IVFPQSearch(const std::vector<std::vector<double>>& db_bows, const std::vector<std::string>& db_ids, int clusters, int probes, int subquantizers, int bits, int seed = 1);
 
-    // returns a copy that shares the trained index but searches the given number of clusters
+    // a copy that shares the trained index but searches the given number of clusters
     IVFPQSearch withProbes(int probe_count) const;
-    
-    // returns the 10 candidates with the smallest ADC distance, plus metrics
+
+    // the 10 vectors of the probed clusters with the smallest asymmetric distance (ADC) to the query
+    // there is no reranking by exact distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
 };
 
-// writes every query's ranking and metrics followed by the mean metrics to the output file
+// writes the method name, every query's ranking and metrics, and the mean metrics to the output file
+// throws if the file cannot be opened
 void evaluateAndWriteResults(
     const std::string& output_path,
     const std::string& method_name,

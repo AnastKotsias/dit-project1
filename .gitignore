@@ -1,13 +1,10 @@
 build/
-cmake-build-*/
 *.o
-*.out
 .idea/
 .vscode/
 data/
 HPatches/
 MIRFlickr-25K/
-build-release/
 /search
 /*.pdf
 /output.txt

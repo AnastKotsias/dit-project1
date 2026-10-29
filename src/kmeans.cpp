@@ -6,7 +6,6 @@
 #include <stdexcept>
 
 namespace image_search {
-// helpers below are private to this translation unit
 namespace {
 
 // copies row source_row of source into row target_row of target
@@ -18,7 +17,8 @@ void copy_row(const Matrix<T>& source, std::size_t source_row,
 }
 
 // k-means++ seeding: the first center is a uniformly random point, every next one is
-// chosen with probability proportional to its squared distance from the nearest chosen center
+// chosen with probability proportional to its squared distance from the nearest chosen center,
+// which spreads the initial centers apart
 // also fills assignments and distances with the nearest initial center of every point
 template <typename T>
 Matrix<T> kmeanspp_centers(const Matrix<T>& points, std::size_t clusters, std::mt19937& rng,
@@ -34,7 +34,7 @@ Matrix<T> kmeanspp_centers(const Matrix<T>& points, std::size_t clusters, std::m
     }
 
     for(std::size_t c = 1; c < clusters; ++c) {
-        // D(i)^2 summed over all points
+        // sum of the selection weights, the squared distances to the nearest chosen center
         double total = 0.0;
         for(const double distance : distances)
             total += distance;
@@ -77,7 +77,8 @@ Matrix<T> kmeanspp_centers(const Matrix<T>& points, std::size_t clusters, std::m
     return centers;
 }
 
-// assignment step, moves every point to its nearest center and returns how many points moved
+// assignment step, moves every point to its nearest center and returns how many points changed cluster
+// distances receives the squared distance of every point to its center
 template <typename T>
 std::size_t assign_points(const Matrix<T>& points, const Matrix<T>& centers,
                           std::vector<std::size_t>& assignments,
@@ -95,7 +96,7 @@ std::size_t assign_points(const Matrix<T>& points, const Matrix<T>& centers,
 }
 
 // update step, moves every center to the mean of its points
-// an empty cluster is moved onto the point that is farthest from its own center
+// an empty cluster is moved onto the point that is farthest from its own center, using distances from the last assignment
 template <typename T>
 void update_centers(const Matrix<T>& points, const std::vector<std::size_t>& assignments,
                     std::vector<double>& distances, Matrix<T>& centers) {
@@ -157,7 +158,7 @@ std::size_t nearest_center(const T* point, const Matrix<T>& centers) {
     double best_distance = std::numeric_limits<double>::infinity();
     for(std::size_t c = 0; c < centers.rows; ++c) {
         const double distance = squared_distance(point, centers.row(c), centers.cols);
-        // strict comparison keeps the lowest index on ties, which keeps results deterministic
+        // strict comparison keeps the lowest index on ties, so results are deterministic
         if(distance < best_distance) {
             best_distance = distance;
             best = c;
@@ -204,7 +205,7 @@ KMeansResult<T> kmeans(const Matrix<T>& points, std::size_t clusters, int seed,
     return result;
 }
 
-// the program clusters float SIFT descriptors and double BoW vectors
+// explicit instantiations for the two element types the program uses
 template double squared_distance<float>(const float*, const float*, std::size_t);
 template double squared_distance<double>(const double*, const double*, std::size_t);
 template std::size_t nearest_center<float>(const float*, const Matrix<float>&);

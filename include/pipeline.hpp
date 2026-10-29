@@ -12,7 +12,10 @@
 
 namespace image_search {
 
-// collects the sampled training descriptors together with a report of the images that failed
+// SIFT extraction runs in parallel with OpenMP when available, one image per iteration
+// the results are identical to a serial run, whatever the number of threads
+
+// sampled training descriptors together with a report of the images that failed
 struct TrainingDescriptorResult {
     // one matrix per successful image, holding at most S sampled descriptors
     std::vector<DescriptorMatrix> sampled_descriptors;
@@ -23,19 +26,22 @@ struct TrainingDescriptorResult {
     std::vector<SiftExtractionStatus> failed_statuses;
 };
 
-// extracts SIFT descriptors from each training image and samples at most max_features of them
+// extracts SIFT descriptors from each training image and keeps at most max_features of them
+// an image that fails is recorded in the result instead of aborting, deciding what a failure
+// means is left to the caller
+// the sampling uses rng in image order, so it is reproducible for a fixed seed
 TrainingDescriptorResult extract_training_descriptors(
     const std::vector<std::filesystem::path>& image_paths,
     int max_features,
     std::mt19937& rng);
 
-// an image record that could not be turned into a vector, with the reason
+// an image that could not be turned into a vector, with the reason
 struct FailedImageRecord {
     ImageRecord record;
     SiftExtractionStatus status;
 };
 
-// bag of visual words vectors of the successfully processed images, plus the failures
+// BoVW vectors of the successfully processed images, plus the failures
 struct BowVectorResult {
     // one normalized histogram per successful image
     std::vector<std::vector<double>> vectors;
@@ -45,26 +51,29 @@ struct BowVectorResult {
     std::vector<FailedImageRecord> failed_records;
 };
 
-// A non-zero limit stops after that many successful records; zero processes all.
+// converts the records, in order, to BoVW vectors, skipping the images that fail
+// a non-zero successful_limit stops after that many successful images, so the first D usable
+// images can be taken, a failed image is replaced by the next record; zero processes all records
 BowVectorResult extract_bow_vectors(
     const std::vector<ImageRecord>& records,
     const DescriptorMatrix& vocabulary,
     std::size_t successful_limit = 0);
 
-// bag of visual words vectors of the same images under several vocabularies
+// BoVW vectors of the same images under several vocabularies
 struct MultiBowVectorResult {
     // vectors[v][i] is the histogram of the i-th successful image under vocabulary v
     std::vector<std::vector<std::vector<double>>> vectors;
     // identifier of each successful image
     std::vector<std::string> identifiers;
-    // position in the input records of each successful image
+    // position in the input records of each successful image, which tells how many images
+    // were skipped before any prefix of the successful ones
     std::vector<std::size_t> record_indices;
-    // images skipped because their descriptors could not be extracted
     std::vector<FailedImageRecord> failed_records;
 };
 
 // like extract_bow_vectors, but builds one histogram per vocabulary from a single SIFT extraction
 // per image, so comparing vocabulary sizes does not repeat the extraction
+// throws if no vocabulary is given
 MultiBowVectorResult extract_bow_vector_sets(
     const std::vector<ImageRecord>& records,
     const std::vector<DescriptorMatrix>& vocabularies,

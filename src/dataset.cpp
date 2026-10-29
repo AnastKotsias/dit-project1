@@ -13,16 +13,15 @@
 
 namespace image_search {
 
-// helpers below are private to this translation unit
 namespace {
 
-// extracts the number from a file name of the form "im<number>", or nothing if it does not match
+// number in a file name of the form "im<number>", e.g. 123 for "im123.jpg", or nothing if it does not match
 std::optional<int> extract_image_number(const std::filesystem::path& path) {
-    // file name without directory and extension, e.g. "im123"
+    // file name without directory and extension
     const std::string stem = path.stem().string();
     constexpr char prefix[] = "im";
     constexpr std::size_t prefix_length = sizeof(prefix) - 1;
-    // reject names that lack the prefix or have nothing after it
+    // the name must start with the prefix and have at least one character after it
     if(stem.size() <= prefix_length ||
        stem.compare(0, prefix_length, prefix) != 0) {
         return std::nullopt;
@@ -33,25 +32,24 @@ std::optional<int> extract_image_number(const std::filesystem::path& path) {
     int number = 0;
     const auto result = std::from_chars(
         digits.data(), digits.data() + digits.size(), number);
-    // reject conversion errors and trailing non-digit characters
+    // reject conversion errors and trailing characters such as the "a" in "im12a"
     if(result.ec != std::errc{} || result.ptr != digits.data() + digits.size()) {
         return std::nullopt;
     }
     return number;
 }
 
-// lists all jpeg files of the MIRFlickr directory in a deterministic, numerically sorted order
+// all jpeg files of the MIRFlickr directory in ascending numeric order of their image number
 std::vector<std::filesystem::path> list_mirflickr_images(
     const std::string& mir_dir) {
     namespace fs = std::filesystem;
     const fs::path directory(mir_dir);
-    // fail early with a clear message when the directory is missing
     if(!fs::is_directory(directory)) {
         throw std::runtime_error("MIRFlickr directory does not exist: " + mir_dir);
     }
 
     std::vector<fs::path> images;
-    // collect only regular files with a jpeg extension
+    // directory_iterator has no defined order, so the order is fixed by the sort below
     for(const auto& entry : fs::directory_iterator(directory)) {
         if(!entry.is_regular_file()) {
             continue;
@@ -63,9 +61,7 @@ std::vector<std::filesystem::path> list_mirflickr_images(
         }
     }
 
-    // numbered names come first in numeric order, so im2 comes before im10, then any other names
-    // alphabetically; comparing (has no number, number, file name) as one key keeps this a strict
-    // weak ordering, which std::sort requires, even when numbered and other names are mixed
+    // sorts by number, so im2 comes before im10, with unnumbered names last in alphabetical order
     std::sort(images.begin(), images.end(),
         [](const fs::path& left, const fs::path& right) {
             const auto left_number = extract_image_number(left);
@@ -78,48 +74,43 @@ std::vector<std::filesystem::path> list_mirflickr_images(
 
 }  // namespace
 
-// reads the split file where each line holds a sequence name and its subset, and validates it
 std::map<std::string, std::vector<std::string>> load_dataset_splits(
     const std::string& split_file) {
-    // subset name -> sequence names, in file order
     std::map<std::string, std::vector<std::string>> splits;
     std::ifstream file(split_file);
     if(!file.is_open()) {
         throw std::runtime_error("could not open split file " + split_file);
     }
 
-    // used to detect a sequence that appears more than once
     std::set<std::string> seen_sequences;
     std::string line;
 
     while(std::getline(file, line)) {
-        // blank lines are allowed and ignored
+        // blank lines are ignored
         if(line.empty()) {
             continue;
         }
 
-        // split the line into whitespace separated fields
+        // a line must hold exactly two whitespace separated fields
         std::istringstream fields(line);
         std::string sequence;
         std::string subset;
         std::string extra;
-        // each line must contain exactly two fields
         if(!(fields >> sequence >> subset) || (fields >> extra)) {
             throw std::invalid_argument("malformed split file line: " + line);
         }
-        // only the three known subset names are accepted
-        if(subset != "train" && subset != "validation" && subset != "test") {
+        // only the three known subsets are accepted
+        if(subset != "train"&& subset != "validation" && subset != "test") {
             throw std::invalid_argument("invalid subset name in split file");
         }
-        // insert fails when the sequence was already seen, which means a duplicate
+        // insert reports false for a sequence that was already seen
         if(!seen_sequences.insert(sequence).second) {
             throw std::invalid_argument("duplicate sequence in split file");
         }
-        // record the sequence under its subset
         splits[subset].push_back(sequence);
     }
 
-    // the HPatches split must contain exactly 70 train, 23 validation and 23 test sequences
+    // the HPatches split of the dataset
     if(splits["train"].size() != 70 ||
        splits["validation"].size() != 23 ||
        splits["test"].size() != 23) {
@@ -130,17 +121,13 @@ std::map<std::string, std::vector<std::string>> load_dataset_splits(
     return splits;
 }
 
-// returns the paths of all six images of every given training sequence
 std::vector<std::filesystem::path> get_training_image_paths(
     const std::string& hp_path,
     const std::vector<std::string>& train_sequences) {
 
-    // result list, in sequence order and then image order
     std::vector<std::filesystem::path> paths;
-    // root directory of the HPatches dataset
-    std::filesystem::path base(hp_path);
+    const std::filesystem::path base(hp_path);
 
-    // hpatches sequences contain images named 1.ppm to 6.ppm
     for(const auto& seq : train_sequences) {
         for(int i = 1 ; i <= 6 ; ++i) {
             paths.push_back(base / seq / (std::to_string(i) + ".ppm"));
@@ -150,31 +137,27 @@ std::vector<std::filesystem::path> get_training_image_paths(
     return paths;
 }
 
-// builds the queries, database and distractor pool for either the validation or the test split
 EvaluationDataset get_evaluation_paths(
     const std::string& hp_dir,
     const std::string& mir_dir,
     const std::string& split_file,
     const std::string& set_type) {
     EvaluationDataset dataset;
-    // training data is not used for evaluation, so only these two splits are valid
+    // training sequences are never evaluated
     if(set_type != "validation" && set_type != "test") {
         throw std::invalid_argument("set_type must be validation or test");
     }
-    // load and validate the split file
     const auto splits = load_dataset_splits(split_file);
-    // sequences belonging to the requested split
     const auto& sequences = splits.at(set_type);
-    // root directory of the HPatches dataset
     const std::filesystem::path hp_base(hp_dir);
 
     for(const auto& sequence : sequences) {
-        // image 1 of each sequence is the query and is labelled with the sequence name
+        // image 1 is the query and is identified by the sequence name
         dataset.queries.push_back({
             (hp_base / sequence / "1.ppm").string(),
             sequence
         });
-        // images 2 to 6 are the relevant database images for that query
+        // images 2 to 6 are the five relevant database images, identified as "<sequence>/<number>"
         for(int image_number = 2 ; image_number <= 6 ; ++image_number) {
             dataset.database.push_back({
                 (hp_base / sequence /
@@ -184,9 +167,8 @@ EvaluationDataset get_evaluation_paths(
         }
     }
 
-    // MIRFlickr images serve as distractors and keep their numeric order
-    const auto mirflickr_images = list_mirflickr_images(mir_dir);
-    for(const auto& path : mirflickr_images) {
+    // every image is kept, since whether it is usable is only known after SIFT extraction
+    for(const auto& path : list_mirflickr_images(mir_dir)) {
         dataset.distractor_pool.push_back({
             path.string(),
             path.filename().string()

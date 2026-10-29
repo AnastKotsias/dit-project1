@@ -10,15 +10,12 @@
 #include <utility>
 
 namespace image_search {
-// shared helpers and aliases from common.hpp
 using namespace detail;
 
-// helpers below are private to this translation unit
 namespace {
 
-// Calculates the number of unique values that can be represented with a given number of bits
+// number of codebook entries 2^bits, the bits are limited so that every code fits in a uint16_t
 int checkedCodeCount(int bits) {
-    // limits the codebook size to 2^16 entries, so every code fits in a uint16_t
     if(bits <= 0 || bits > kMaxPQBits)
         throw std::invalid_argument("IVFPQ nbits must be in the range 1.." +
                                     std::to_string(kMaxPQBits));
@@ -27,24 +24,31 @@ int checkedCodeCount(int bits) {
 
 } // namespace
 
-// IVFPQ index, which stores each vector as the quantized residual from its cluster center
-// queries are ranked by the asymmetric distance (ADC) to the stored codes,
-// so the full database vectors are not used at query time
+// IVFPQ index: each vector is stored as the product-quantized residual from its coarse center
+// the residual is split into M subvectors, and each subvector is replaced by the index of the nearest
+// centroid of the codebook of its subspace
+// queries are ranked by the asymmetric distance (ADC) to these codes, so the full vectors are not used
 struct IVFPQSearch::Impl : DatabaseIndex {
-    std::size_t subquantizers;  // Number of subquantizers (M)
-    std::size_t width;          // Length of each subvector, the vector dimension divided by M
-    std::vector<Vector> centers;                        // Coarse cluster centers obtained from k-means clustering
-    std::vector<std::vector<std::size_t>> lists;        // Inverted lists for each coarse cluster center
-    std::vector<Matrix<double>> codebooks;              // codebooks[m] holds the centroids of subspace m, one per row
-    std::vector<std::uint16_t> codes;                   // codes[i * M + m] is the codebook entry of subvector m of vector i
+    // number of subvectors M
+    std::size_t subquantizers;
+    // length of each subvector, the vector dimension divided by M
+    std::size_t width;
+    // coarse centers, trained on a random sample of the database vectors
+    std::vector<Vector> centers;
+    // database indices belonging to each coarse center
+    std::vector<std::vector<std::size_t>> lists;
+    // codebooks[m] holds the centroids of subspace m, one per row
+    std::vector<Matrix<double>> codebooks;
+    // codes[i * M + m] is the codebook entry of subvector m of vector i
+    std::vector<std::uint16_t> codes;
 
-    // trains the coarse clusters, the PQ codebooks and encodes the whole database
+    // trains the coarse clusters and the codebooks, then encodes the whole database
     Impl(const std::vector<Vector>& db, const std::vector<std::string>& names, int clusterCount, int subCount, int bits, int seed)
             : DatabaseIndex{db, names} {
         const int codeCount = checkedCodeCount(bits);
         if(clusterCount <= 0)
             throw std::invalid_argument("IVFPQ kclusters must be strictly positive");
-        // Check for valid subquantizer count and ensure it divides the vector dimension
+        // the vector is split into M subvectors of equal length
         if(subCount <= 0)
             throw std::invalid_argument("IVFPQ M must be positive");
         subquantizers = static_cast<std::size_t>(subCount);
@@ -54,23 +58,22 @@ struct IVFPQSearch::Impl : DatabaseIndex {
 
         auto coarse = trainIVFClusters(database, clusterCount, seed);
         centers = std::move(coarse.centers);
-        // nearest coarse centroid of every database vector, sampled or not
+        // all database vectors, not only the training sample, are in the list of their nearest center
         const std::vector<std::size_t> coarse_assignments = std::move(coarse.assignments);
         lists.resize(centers.size());
         for(std::size_t i = 0; i < database.size(); ++i) {
             lists[coarse_assignments[i]].push_back(i);
         }
 
-        // residual of database vector i, namely the vector minus its coarse center
+        // residual of database vector i: the vector minus its coarse center
         const auto residualOf = [&](std::size_t i, Vector& residual) {
             const auto& center = centers[coarse_assignments[i]];
             for(std::size_t d = 0; d < residual.size(); ++d)
                 residual[d] = database[i][d] - center[d];
         };
 
-        // codebooks are trained on the residuals of all n database vectors,
-        // without exact reranking the
-        // codebook quality bounds IVFPQ's accuracy
+        // the codebooks are trained on the residuals of all n database vectors, since without exact
+        // reranking the codebook quality bounds the accuracy
         // training[m] holds subvector m of every residual, one per row
         const std::size_t trainingSize = database.size();
         std::vector<Matrix<double>> training(subquantizers, Matrix<double>(trainingSize, width));
@@ -82,7 +85,7 @@ struct IVFPQSearch::Impl : DatabaseIndex {
                           training[m].row(i));
         }
 
-        // one k-means codebook of 2^nbits entries per subquantizer, fewer if there are fewer residuals
+        // one k-means codebook per subspace, with 2^nbits entries or fewer if there are fewer residuals
         const std::size_t codebookSize = std::min(static_cast<std::size_t>(codeCount), trainingSize);
         // seed + m + 1 is computed in unsigned arithmetic, which wraps instead of overflowing for a seed
         // near INT_MAX, and converted back to int, which C++20 defines as modular
@@ -92,7 +95,7 @@ struct IVFPQSearch::Impl : DatabaseIndex {
             codebooks.push_back(image_search::kmeans(training[m], codebookSize, codebookSeed).centers);
         }
 
-        // Encode each database residual with the corresponding PQ codebooks.
+        // encode every residual: each subvector becomes the index of its nearest codebook entry
         codes.resize(database.size() * subquantizers);
         for(std::size_t i = 0; i < database.size(); ++i) {
             residualOf(i, residual);
@@ -106,17 +109,17 @@ struct IVFPQSearch::Impl : DatabaseIndex {
     // returns the database indices of the 10 smallest ADC distances among the probed lists, nearest first
     // examined receives the number of ADC distances computed
     std::vector<std::size_t> candidates(const Vector& query, int probes, std::size_t& examined) const {
-        const auto selected = nearestCenters(query, centers, probes);   // Find the nearest coarse cluster centers to the query vector
+        const auto selected = nearestCenters(query, centers, probes);
         const std::size_t codebookSize = codebooks.front().rows;
-        // stored vectors with their ADC distance to the query
+        // vectors of the probed lists with their ADC distance to the query
         std::vector<ScoredId> ranked;
         Vector queryResidual(query.size());
-        // lookup[m * s + h] is the squared distance of the query's m-th residual subvector to entry h of codebook m
+        // lookup[m * codebookSize + h] is the squared distance of the query residual's subvector m to entry h of codebook m
         std::vector<double> lookup(subquantizers * codebookSize);
 
-        // Build one residual-PQ lookup table for each selected coarse cell.
+        // one lookup table per probed list, since the residual depends on the list's center
         for(const auto center : selected) {
-            // residual of the query relative to this cluster's center
+            // residual of the query relative to this list's center
             for(std::size_t d = 0; d < query.size(); ++d)
                 queryResidual[d] = query[d] - centers[center][d];
             for(std::size_t m = 0; m < subquantizers; ++m) {
@@ -146,7 +149,6 @@ struct IVFPQSearch::Impl : DatabaseIndex {
     }
 };
 
-// IVFPQSearch constructor
 IVFPQSearch::IVFPQSearch(const std::vector<Vector>& db, const std::vector<std::string>& ids, int clusters, int probes, int subquantizers, int bits, int seed)
     : impl(std::make_shared<Impl>(db, ids, clusters, subquantizers, bits, seed)), probes(checkedProbes(probes)) {}
 
@@ -157,7 +159,6 @@ IVFPQSearch IVFPQSearch::withProbes(int probe_count) const {
     return copy;
 }
 
-// IVFPQSearch search function
 SearchResult IVFPQSearch::search(const Vector& query, const std::string& queryId, const std::string& sequenceId) const {
     const auto start = std::chrono::steady_clock::now();
     // checked first, since the lookup tables index the query by the database dimension
