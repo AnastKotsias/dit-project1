@@ -107,7 +107,7 @@ by `-M`, …) is rejected with an error before any image is processed.
 
 ### Output
 
-The file follows the format of the assignment: the method name once, one block
+The file follows the required output format: the method name once, one block
 per query, then the means. Values have four decimals, times are in milliseconds.
 
 ```text
@@ -180,7 +180,7 @@ use the pimpl idiom). `main.cpp` only orchestrates and decides the failure
 policy; `pipeline.cpp` and `experiment.cpp` provide reusable operations that
 can be tested independently of the command line. `src/search/common.hpp` is
 not in `include/` because it is internal to the search module. Generated files
-(`build/`, `search`, data sets, PDFs) are ignored by Git.
+(`build/`, `search`, data sets) are ignored by Git.
 
 ## 4. Design and algorithmic decisions
 
@@ -256,28 +256,25 @@ asymmetric distance.
   centroids. A query builds, for each probed list, an `M × 2^nbits` lookup table
   of squared distances from its residual to the centroids; the ADC distance of a
   stored vector is the sum of `M` table entries. The 10 smallest are returned,
-  **without reranking by exact distance**. The assignment does not say how the
-  codebooks are trained; we train them on the residuals of all `n` database
+  **without reranking by exact distance**. We train the codebooks on the residuals of all `n` database
   vectors (our choice). With `nbits=8` the common guideline of about 39 training
   points per centroid is met from `n ≈ 10000`; at `D=1000` each centroid gets
   only about 4, which affects IVFPQ accuracy there.
 
-### 4.5 IVF clustering: clarification of the professor
+### 4.5 IVF clustering
 
-The assignment says that the IVF k-means is trained on all `n` vectors and that
-the default `kclusters` is ⌈√n⌉. The professor corrected this in the course Q&A:
-the k-means runs on a **random sample of about √n** of the `n` vectors, the number of
-centers is `-kclusters` and is independent of the sample size, the ⌈√n⌉ default
-was a mistake and is not valid, a smaller number of clusters should be chosen
-from validation experiments, and afterwards **all** `n` vectors (sampled ones
-included) are assigned to their nearest center and inserted into the inverted
-lists, so no image is excluded from the search. We therefore:
+For IVFFlat and IVFPQ the coarse k-means runs on a **random sample of about √n**
+of the `n` database vectors, not on all of them. The number of centers is
+`-kclusters` and is independent of the sample size. Choosing `kclusters = ⌈√n⌉`
+is not appropriate here, so a smaller number of clusters is selected from the
+validation experiments. Afterwards **all** `n` vectors (sampled ones included) are
+assigned to their nearest center and inserted into the inverted lists, so no
+image is excluded from the search. We therefore:
 
 - train on a seeded random sample of ⌈√n⌉ vectors (`trainIVFClusters`,
   [src/search/common.cpp](src/search/common.cpp)) and assign all `n` vectors afterwards;
 - use `max(5, round(n^(1/4)))` as the default `kclusters` (6, 8, 10 and 13 for
-  the four database sizes) — this formula is our own choice, since no
-  replacement was given; the default `nprobe` is 5 as in the assignment;
+  the four database sizes) — this formula is our own choice; the default `nprobe` is 5;
 - lower a `-kclusters` larger than the sample size to ⌈√n⌉ with a warning, since
   k-means cannot form more clusters than it has points (the line
   `resolved IVF parameters` shows the values actually used).
@@ -299,12 +296,11 @@ reports that time. Experiment mode is described in §5.
 Every random choice (descriptor sampling, k-means, LSH/Hypercube projections,
 IVF sampling, PQ codebooks) derives from `-seed` (default 1), so a run with the
 same seed and data gives the same rankings and metrics, independent of the number
-of threads. The optional `-cache` of the assignment was not implemented; every run
-recomputes all features.
+of threads.
 
 ## 5. Experimental study
 
-`./search ... -experiment` (§2) performs the whole study of the assignment:
+`./search ... -experiment` (§2) performs the whole experimental study:
 
 1. **Preprocessing once:** training descriptors are sampled once and every `K` is
    trained on the same sample; each validation, test and MIRFlickr image is
