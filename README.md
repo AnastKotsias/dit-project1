@@ -672,11 +672,16 @@ k-means sample    = ceil(sqrt(n_database)) vectors
 These values are resolved after invalid images have been removed, so they are
 based on the actual index size rather than the nominal requested size.
 
-The assignment's `kclusters` default of ⌈√n⌉ was withdrawn by the professor in
-the course Q&A: ⌈√n⌉ is the size of the random k-means training sample, not
-the number of clusters, and the number of clusters should be smaller, in the
-range 5 to n^(1/4), chosen on the validation set. The default
-`max(5, round(n^(1/4)))` gives 6, 8, 10, and 13 clusters for the nominal
+The assignment text gives ⌈√n⌉ as the `kclusters` default and says the IVF
+k-means is trained on all `n` vectors. The professor corrected both in the
+course Q&A: the k-means runs on a random sample of about √n of the `n` BoVW
+vectors, the number of centers is set by `-kclusters` and must not be confused
+with the sample size, the ⌈√n⌉ default "was included by mistake and is not
+valid", a smaller number of clusters should be used, chosen from experiments on
+the validation set, and afterwards all vectors, the sampled ones included, are
+assigned to their nearest center and added to the inverted lists, so no image is
+excluded from the search. The professor gave no replacement formula, so the
+default `max(5, round(n^(1/4)))` is our own choice of a small value. It gives 6, 8, 10, and 13 clusters for the nominal
 database sizes 1115, 5115, 10115, and 25115. The default `nprobe=5` is the
 assignment's; with 5 or 6 clusters it probes most or all of the lists.
 
@@ -778,13 +783,14 @@ trade-off are varied, the others are kept at fixed values):
 | IVFFlat | `kclusters` ∈ {5, 6, 8, 10}, `nprobe` ∈ {1, 2, 3, 5} | - |
 | IVFPQ | `kclusters` ∈ {5, 6, 8, 10}, `nprobe` ∈ {1, 2, 3, 5} | `M=16`, `nbits=8` |
 
-The `kclusters` values cover the professor's range of 5 to n^(1/4), about 10
-for the validation database of 10115 vectors, and every `nprobe` is at most the
-smallest `kclusters`. The selected configuration, `kclusters` included, is
+The `kclusters` values are our own choice of small cluster counts, as the
+professor instructed, from 5 up to about n^(1/4) ≈ 10 for the validation
+database of 10115 vectors, and every `nprobe` is at most the smallest
+`kclusters`. The selected configuration, `kclusters` included, is
 used unchanged for every test `D`, since the test parameters are the ones
 chosen on validation. The k-means sample still grows with the database
 (⌈√n⌉ vectors), and at `D=1000` (n^(1/4) ≈ 5.8) a selected `kclusters` above 6
-lies outside that range.
+is larger than that choice was designed for.
 
 Selection rule: for each method, every configuration whose validation mAP@10
 is within 0.01 of that method's best counts as equally accurate, and among
@@ -880,16 +886,18 @@ Implemented search methods:
   vectors with the smallest asymmetric distance (the sum of `M` table lookups),
   without reranking by exact distance, so IVFPQ trades accuracy for speed
   relative to IVFFlat. Codes are stored as one flat array of 16-bit indices.
-  The `M` codebooks are trained on the residuals of all `n` database vectors,
-  as the assignment specifies for the IVF k-means. Since there is no
+  The `M` codebooks are trained on the residuals of all `n` database vectors.
+  This is our own design choice: the professor's ruling about the √n sample
+  covers only the coarse centers, and the assignment does not say how the PQ
+  codebooks are trained. Since there is no
   reranking, codebook quality bounds IVFPQ's accuracy, and the common
   guideline of at least about 39 training points per centroid (FAISS) is
   met for `nbits=8` from `n ≈ 10000` upward. At `D=1000` (n=1115) each
   of the 256 centroids has about 4 training points, which the report should
   take into account. In a benchmark on synthetic data, training one
   codebook took about 0.5–1 s at `n=10115` and 2–5 s at `n=25115`
-  (`K=128` to `1024`), which makes it the largest part of an IVFPQ build. Only the coarse centers use the
-  ⌈√n⌉ random sample
+  (`K=128` to `1024`), which makes it the largest part of an IVFPQ build. Only the
+  coarse centers use the ⌈√n⌉ random sample.
 
 In single-run mode, all methods write the assignment's result file through
 `-o`. Exact search ranks the complete database. Approximate indexes rank only

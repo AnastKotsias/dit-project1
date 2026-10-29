@@ -68,8 +68,9 @@ struct IVFPQSearch::Impl : DatabaseIndex {
                 residual[d] = database[i][d] - center[d];
         };
 
-        // codebooks are trained on the residuals of all n database vectors, as the assignment specifies for
-        // the IVF k-means, since without exact reranking the codebook quality bounds IVFPQ's accuracy
+        // codebooks are trained on the residuals of all n database vectors,
+        // without exact reranking the
+        // codebook quality bounds IVFPQ's accuracy
         // training[m] holds subvector m of every residual, one per row
         const std::size_t trainingSize = database.size();
         std::vector<Matrix<double>> training(subquantizers, Matrix<double>(trainingSize, width));
