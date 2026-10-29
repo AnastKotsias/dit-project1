@@ -9,3 +9,5 @@ HPatches/
 MIRFlickr-25K/
 build-release/
 /search
+/*.pdf
+/output.txt
