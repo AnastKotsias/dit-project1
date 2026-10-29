@@ -443,7 +443,7 @@ int main(int argc, char** argv) {
     // fill in IVF defaults that depend on the database size, which was unknown during parsing
     if(args.method == "ivfflat" || args.method == "ivfpq") {
         // default number of clusters is max(5, round(n^(1/4)))
-        // the ceil(sqrt(n)) default of the assignment was withdrawn, sqrt(n) is now the k-means sample size
+        // ceil(sqrt(n)) is the size of the k-means sample, not a cluster count
         if(args.ivf_kclusters == -1) {
             args.ivf_kclusters = std::max(5, static_cast<int>(
                 std::lround(std::pow(static_cast<double>(n_database), 0.25))));

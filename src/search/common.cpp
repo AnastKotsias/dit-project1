@@ -47,7 +47,7 @@ std::vector<std::size_t> nearestCenters(const Vector& query, const std::vector<V
     return result;
 }
 
-// IVF build step of the lecture: runs the shared k-means on a random sample X' of ceil(sqrt(n)) points,
+// IVF build step: runs the shared k-means on a random sample X' of ceil(sqrt(n)) points,
 // then assigns every point, the sampled ones included, to its nearest center, so no point is left out of the lists
 Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, int seed) {
     // nothing to cluster
@@ -220,7 +220,7 @@ DatabaseIndex::DatabaseIndex(const std::vector<Vector>& values, const std::vecto
 
 } // namespace detail
 
-// size of the random sample X' of the lecture's IVF build step
+// size of the random sample X' the IVF k-means is trained on
 std::size_t ivfTrainingSampleSize(std::size_t database_size) {
     return static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(database_size))));
 }

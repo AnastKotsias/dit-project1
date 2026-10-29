@@ -57,7 +57,7 @@ struct Aggregate {
     double candidates = 0.0;
     // number of queries added so far
     std::size_t count = 0;
-    // queries for which the index returned fewer than 10 results, reported by the assignment
+    // queries for which the index returned fewer than 10 results
     std::size_t short_results = 0;
 
     // accumulates the metrics of one query
@@ -303,7 +303,7 @@ std::vector<MethodConfig> validation_configs() {
     for(const int max_candidates : {250, 500, 1000, 2000})
         for(const int probes : {5, 10, 20, 40})
             configs.push_back({"HYPERCUBE", 10, max_candidates, 50, probes});
-    // IVF cluster counts from the professor's range of 5 to n^(1/4), about 10 for the validation database,
+    // IVF cluster counts from 5 up to about n^(1/4) = 10 for the validation database,
     // every nprobe is at most the smallest cluster count, and kclusters=5 with nprobe=5 probes every list
     // kclusters is the outer loop, so each IVF index is trained once and reused for its nprobe values
     // IVFFlat trying several cluster and probe counts
@@ -317,7 +317,7 @@ std::vector<MethodConfig> validation_configs() {
     return configs;
 }
 
-// formats the parameters of a configuration with the names of the assignment's command line options
+// formats the parameters of a configuration with the names of the command line options
 std::string describe(const MethodConfig& config) {
     std::ostringstream text;
     if(config.method == "LSH")

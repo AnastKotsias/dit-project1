@@ -14,7 +14,7 @@ const std::string kMissingRank = "-";
 
 }  // namespace
 
-// writes per-query results and the aggregate means in the output format required by the assignment
+// writes per-query results and the aggregate means to the output file
 void evaluateAndWriteResults(const std::string& outputPath, const std::string& methodName, const std::vector<SearchResult>& results) {
     // Open the output file for writing and check if it was successful
     std::ofstream output(outputPath);
@@ -36,7 +36,7 @@ void evaluateAndWriteResults(const std::string& outputPath, const std::string& m
     }
     const double count = static_cast<double>(results.size());   // Number of queries processed
     output << std::fixed << std::setprecision(4);               // Set output formatting for floating-point numbers
-    // Write the results for each query to the output file as specified in the project requirements:
+    // Write the results for each query to the output file:
     // the method name once, then one block per query with no blank lines inside it, blocks separated by one blank line
     output << methodName << "\n";
     for(const auto& result : results) {
