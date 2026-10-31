@@ -17,7 +17,7 @@ The data are the full-size **HPatches** sequences (116 sequences of six images;
 3. [Source files](#3-source-files)
 4. [Design and algorithmic decisions](#4-design-and-algorithmic-decisions)
 5. [Experimental study](#5-experimental-study)
-6. [Use of AI](#6-use-of-ai)
+6. [Pseudocode](#6-pseudocode)
 
 ## 1. Requirements and build
 
@@ -176,6 +176,8 @@ of the run made with `-S 500 -seed 1`.
 │       ├── common.hpp/.cpp      private helpers shared by the methods (distances, IVF clustering, result building)
 │       ├── exact.cpp, lsh.cpp, hypercube.cpp, ivfflat.cpp, ivfpq.cpp
 │       └── output.cpp           evaluateAndWriteResults
+├── tests/
+│   └── unit_tests.cpp           unit tests (k-means, distances, exact search, paths), run by "make test"
 └── results/                     output of the final experiment run
 ```
 
@@ -342,14 +344,7 @@ of threads.
 
 The result tables are in [results/experiment.md](results/experiment.md).
 
-## 6. Use of AI
-
-As required by the course, this section records the use of AI. AI was used only
-as a helper (explaining errors, refactoring existing code, small subroutines),
-not for the overall design or the algorithmic decisions. Every student commits to Git
-with descriptive messages.
-
-### Pseudocode of the whole program
+## 6. Pseudocode
 
 ```text
 main(args):

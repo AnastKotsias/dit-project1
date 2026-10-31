@@ -2,7 +2,7 @@
 
 # the ./search link lets the program run as ./search
 all:
-	cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+	cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SEARCH_APP=ON
 	cmake --build build --parallel
 	ln -sf build/search search
 
