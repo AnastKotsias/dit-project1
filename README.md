@@ -26,12 +26,16 @@ The data are the full-size **HPatches** sequences (116 sequences of six images;
 
 ```bash
 make                  # Release build in build/, creates the ./search link
+make test             # builds and runs the unit tests
 make clean
 ```
 
 The Makefile always builds in `Release` mode, since k-means and BoVW
 construction are very slow without optimization. `-Wall -Wextra -Wpedantic` are
 enabled.
+
+The unit tests run through CTest and cover the reusable numerical and search
+components without requiring the image data sets.
 
 **OpenCV use.** OpenCV is used only for `cv::imread` and
 `cv::SIFT::detectAndCompute` (in `extract_sift_descriptors`,
