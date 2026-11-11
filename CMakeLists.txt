@@ -48,9 +48,13 @@ if(BUILD_SEARCH_APP)
 endif()
 
 if(BUILD_TESTING)
+    find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
+
     add_executable(image_search_tests
         tests/unit_tests.cpp
         src/dataset.cpp
+        src/image_features.cpp
+        src/local_features.cpp
         src/kmeans.cpp
         src/search/common.cpp
         src/search/exact.cpp
@@ -58,5 +62,6 @@ if(BUILD_TESTING)
     )
 
     target_include_directories(image_search_tests PRIVATE include src/search)
+    target_link_libraries(image_search_tests PRIVATE ${OpenCV_LIBS})
     add_test(NAME image_search_unit_tests COMMAND image_search_tests)
 endif()

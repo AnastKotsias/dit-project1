@@ -1,4 +1,5 @@
 #include "dataset.hpp"
+#include "local_features.hpp"
 #include "kmeans.hpp"
 #include "search.hpp"
 
@@ -98,6 +99,17 @@ void testDatasetPaths() {
     check(paths.back() == std::filesystem::path("dataset") / "i_bike" / "6.ppm", "last training path is incorrect");
 }
 
+// Test the local-feature extraction status for an unreadable image.
+void testLocalFeatures() {
+    const auto result = image_search::extract_sift_features(
+        std::filesystem::path("missing-image-for-unit-test.pgm"));
+
+    check(result.status == image_search::SiftExtractionStatus::ImageUnreadable,
+          "local feature extraction did not report an unreadable image");
+    check(result.points.empty() && result.descriptors.empty(),
+          "unreadable image returned local features");
+}
+
 }
 
 int main() {
@@ -107,6 +119,7 @@ int main() {
         testKmeans();
         testExactSearch();
         testDatasetPaths();
+        testLocalFeatures();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;
