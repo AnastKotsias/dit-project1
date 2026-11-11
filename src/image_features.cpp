@@ -1,13 +1,11 @@
 #include "image_features.hpp"
-#include <vector>
+#include "local_features.hpp"
+
 #include <numeric>
 #include <random>
 #include <algorithm>
 #include <stdexcept>
 #include <utility>
-#include <opencv2/core.hpp>
-#include <opencv2/features2d.hpp>
-#include <opencv2/imgcodecs.hpp>
 
 namespace image_search {
 
@@ -26,40 +24,8 @@ const char* sift_extraction_status_name(SiftExtractionStatus status) {
 
 SiftExtractionResult extract_sift_descriptors(
     const std::filesystem::path& image_path) {
-    // imread returns an empty matrix instead of throwing when loading fails
-    cv::Mat image = cv::imread(image_path.string(), cv::IMREAD_GRAYSCALE);
-
-    if(image.empty()) {
-        return {{}, SiftExtractionStatus::ImageUnreadable};
-    }
-
-    // default SIFT parameters, which give 128 values per descriptor
-    const auto sift = cv::SIFT::create();
-    // the API requires the keypoints as output, but only the descriptors are used
-    std::vector<cv::KeyPoint> keypoints;
-    cv::Mat descriptors;
-
-    // no mask, so keypoints are detected over the whole image
-    sift->detectAndCompute(image, cv::noArray(), keypoints, descriptors);
-
-    // an image without keypoints, such as a blank one, yields no descriptors
-    if(descriptors.empty()) {
-        return {{}, SiftExtractionStatus::NoDescriptors};
-    }
-    if(descriptors.type() != CV_32F) {
-        throw std::runtime_error("SIFT returned descriptors that are not 32-bit floats");
-    }
-
-    // copy into a DescriptorMatrix, so the rest of the program does not depend on OpenCV
-    DescriptorMatrix result(static_cast<std::size_t>(descriptors.rows),
-                            static_cast<std::size_t>(descriptors.cols));
-    for(std::size_t r = 0; r < result.rows; ++r) {
-        // row by row, since a cv::Mat is not guaranteed to be continuous
-        const float* source = descriptors.ptr<float>(static_cast<int>(r));
-        std::copy(source, source + result.cols, result.row(r));
-    }
-
-    return {std::move(result), SiftExtractionStatus::Success};
+    auto features = extract_sift_features(image_path);
+    return {std::move(features.descriptors), features.status};
 }
 
 DescriptorMatrix sample_training_descriptors(

@@ -23,6 +23,7 @@ if(BUILD_SEARCH_APP)
         src/main.cpp
         src/dataset.cpp
         src/image_features.cpp
+        src/local_features.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
