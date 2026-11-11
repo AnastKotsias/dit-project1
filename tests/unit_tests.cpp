@@ -1,4 +1,5 @@
 #include "dataset.hpp"
+#include "descriptor_matching.hpp"
 #include "local_features.hpp"
 #include "kmeans.hpp"
 #include "search.hpp"
@@ -110,6 +111,38 @@ void testLocalFeatures() {
           "unreadable image returned local features");
 }
 
+// Test strict Lowe-ratio matching, tie handling and insufficient candidates.
+void testDescriptorMatching() {
+    image_search::LocalFeatureSet query;
+    query.points = {{{1.0, 2.0}, {3.0, 4.0}}};
+    query.descriptors = image_search::DescriptorMatrix(2, 128);
+    query.descriptors.row(1)[0] = 10.0F;
+
+    image_search::LocalFeatureSet candidate;
+    candidate.points = {{{5.0, 6.0}, {7.0, 8.0}, {9.0, 10.0}}};
+    candidate.descriptors = image_search::DescriptorMatrix(3, 128);
+    candidate.descriptors.row(1)[0] = 1.0F;
+    candidate.descriptors.row(2)[0] = 20.0F;
+
+    const auto matches = image_search::match_descriptors(query, candidate, 0.5);
+    check(matches.size() == 1, "descriptor ratio matching accepted the wrong matches");
+    check(matches.front().query_descriptor_index == 0 &&
+          matches.front().candidate_descriptor_index == 0,
+          "descriptor matching selected the wrong nearest descriptors");
+
+    candidate.descriptors.data[3] = 0.0F;
+    const auto tied = image_search::match_descriptors(query, candidate, 0.5);
+    check(tied.front().candidate_descriptor_index == 0,
+          "descriptor matching did not use the lowest index for a tie");
+    checkThrows([&] { image_search::match_descriptors(query, candidate, 0.0); },
+                "descriptor matching accepted an invalid rho");
+
+    candidate.points.resize(1);
+    candidate.descriptors = image_search::DescriptorMatrix(1, 128);
+    check(image_search::match_descriptors(query, candidate, 0.5).empty(),
+          "descriptor matching accepted a candidate with one descriptor");
+}
+
 }
 
 int main() {
@@ -120,6 +153,7 @@ int main() {
         testExactSearch();
         testDatasetPaths();
         testLocalFeatures();
+        testDescriptorMatching();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;

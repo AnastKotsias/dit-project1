@@ -24,6 +24,7 @@ if(BUILD_SEARCH_APP)
         src/dataset.cpp
         src/image_features.cpp
         src/local_features.cpp
+        src/descriptor_matching.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
@@ -55,6 +56,7 @@ if(BUILD_TESTING)
         src/dataset.cpp
         src/image_features.cpp
         src/local_features.cpp
+        src/descriptor_matching.cpp
         src/kmeans.cpp
         src/search/common.cpp
         src/search/exact.cpp
