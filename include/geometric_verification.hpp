@@ -12,9 +12,9 @@ namespace image_search {
 
 struct RansacConfig {
     // strict reprojection error threshold in pixels
-    double tau = 5.0;
+    double tau = 3.0;
     // maximum number of random hypotheses
-    std::size_t maximum_trials = 1000;
+    std::size_t maximum_trials = 2000;
     // target probability of observing a valid sample
     double confidence = 0.99;
     // enable adaptive trial reduction

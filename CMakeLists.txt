@@ -26,6 +26,7 @@ if(BUILD_SEARCH_APP)
         src/local_features.cpp
         src/descriptor_matching.cpp
         src/homography.cpp
+        src/geometric_verification.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
@@ -59,6 +60,7 @@ if(BUILD_TESTING)
         src/local_features.cpp
         src/descriptor_matching.cpp
         src/homography.cpp
+        src/geometric_verification.cpp
         src/kmeans.cpp
         src/search/common.cpp
         src/search/exact.cpp
