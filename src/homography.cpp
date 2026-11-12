@@ -12,10 +12,14 @@ namespace {
 constexpr double kMinimumProjectionDenominator = 1e-12;
 // minimum accepted normalization scale
 constexpr double kMinimumNormalizationScale = 1e-12;
-// minimum accepted point separation and triangle area
-constexpr double kMinimumTriangleArea = 1e-10;
+// minimum accepted squared distance between distinct points
+constexpr double kMinimumPointSeparationSquared = 1e-10;
+// minimum normalized triangle area for non-collinearity
+constexpr double kMinimumCollinearity = 1e-4;
 // minimum relative second-smallest singular value for four points
 constexpr double kMinimumRelativeSigma8Squared = 1e-8;
+// minimum scale-invariant singular-value ratio for an estimated homography
+constexpr double kMinimumHomographySingularValueRatio = 1e-12;
 // Jacobi rotation convergence threshold
 constexpr double kMinimumEigenvalueGap = 1e-12;
 
@@ -63,19 +67,24 @@ Point2 normalized_point(const Point2& point, const Normalization& normalization)
             (point[1] - normalization.center[1]) * normalization.scale};
 }
 
-double triangle_area(const Point2& first, const Point2& second,
-                     const Point2& third) {
+double triangle_cross_product(const Point2& first, const Point2& second,
+                              const Point2& third) {
     return std::abs((second[0] - first[0]) * (third[1] - first[1]) -
                     (second[1] - first[1]) * (third[0] - first[0]));
+}
+
+double squared_distance(const Point2& first, const Point2& second) {
+    const double dx = first[0] - second[0];
+    const double dy = first[1] - second[1];
+    return dx * dx + dy * dy;
 }
 
 bool has_duplicate_points(const std::vector<Point2>& points) {
     // repeated points reduce the rank of the DLT system
     for(std::size_t first = 0; first < points.size(); ++first) {
         for(std::size_t second = first + 1; second < points.size(); ++second) {
-            const double dx = points[first][0] - points[second][0];
-            const double dy = points[first][1] - points[second][1];
-            if(dx * dx + dy * dy < kMinimumTriangleArea)
+            if(squared_distance(points[first], points[second]) <
+               kMinimumPointSeparationSquared)
                 return true;
         }
     }
@@ -87,8 +96,16 @@ bool has_collinear_triple(const std::vector<Point2>& points) {
     for(std::size_t first = 0; first < points.size(); ++first) {
         for(std::size_t second = first + 1; second < points.size(); ++second) {
             for(std::size_t third = second + 1; third < points.size(); ++third) {
-                if(triangle_area(points[first], points[second], points[third]) <
-                   kMinimumTriangleArea)
+                // normalize the cross product by the largest pairwise length
+                const double maximum_squared_distance = std::max(
+                    {squared_distance(points[first], points[second]),
+                     squared_distance(points[first], points[third]),
+                     squared_distance(points[second], points[third])});
+                if(maximum_squared_distance <= 0.0 ||
+                   triangle_cross_product(points[first], points[second],
+                                          points[third]) /
+                           maximum_squared_distance <
+                       kMinimumCollinearity)
                     return true;
             }
         }
@@ -179,11 +196,63 @@ SvdResult compute_svd(const DltMatrix& matrix) {
     return result;
 }
 
-double determinant(const Matrix3& matrix) {
-    // determinant used for singularity validation
-    return matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7]) -
-           matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6]) +
-           matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6]);
+double homography_singular_value_ratio(const Matrix3& matrix) {
+    // form H transpose H whose eigenvalues are squared singular values
+    std::array<std::array<double, 3>, 3> gram{};
+    for(std::size_t row = 0; row < 3; ++row) {
+        for(std::size_t first = 0; first < 3; ++first) {
+            for(std::size_t second = 0; second < 3; ++second)
+                gram[first][second] +=
+                    matrix[row * 3 + first] * matrix[row * 3 + second];
+        }
+    }
+
+    // Jacobi diagonalization of the symmetric three-by-three matrix
+    for(std::size_t iteration = 0; iteration < 30; ++iteration) {
+        std::size_t first = 0;
+        std::size_t second = 1;
+        if(std::abs(gram[0][2]) > std::abs(gram[first][second])) {
+            first = 0;
+            second = 2;
+        }
+        if(std::abs(gram[1][2]) > std::abs(gram[first][second])) {
+            first = 1;
+            second = 2;
+        }
+        if(std::abs(gram[first][second]) <= kMinimumEigenvalueGap)
+            break;
+
+        const double angle = 0.5 * std::atan2(
+            2.0 * gram[first][second],
+            gram[second][second] - gram[first][first]);
+        const double cosine = std::cos(angle);
+        const double sine = std::sin(angle);
+        for(std::size_t index = 0; index < 3; ++index) {
+            const double first_value = gram[index][first];
+            const double second_value = gram[index][second];
+            gram[index][first] = cosine * first_value - sine * second_value;
+            gram[index][second] = sine * first_value + cosine * second_value;
+        }
+        for(std::size_t index = 0; index < 3; ++index) {
+            const double first_value = gram[first][index];
+            const double second_value = gram[second][index];
+            gram[first][index] = cosine * first_value - sine * second_value;
+            gram[second][index] = sine * first_value + cosine * second_value;
+        }
+    }
+
+    double smallest = std::numeric_limits<double>::infinity();
+    double largest = 0.0;
+    for(std::size_t index = 0; index < 3; ++index) {
+        if(!std::isfinite(gram[index][index]))
+            return 0.0;
+        const double eigenvalue = std::max(0.0, gram[index][index]);
+        smallest = std::min(smallest, eigenvalue);
+        largest = std::max(largest, eigenvalue);
+    }
+    if(largest <= 0.0)
+        return 0.0;
+    return std::sqrt(smallest / largest);
 }
 
 }  // namespace
@@ -300,9 +369,9 @@ HomographyResult estimate_homography(
     // homogeneous matrices are equivalent up to any non-zero scale
     for(double& value : matrix)
         value /= matrix_norm;
-    // reject non-invertible estimates
-    if(!std::isfinite(determinant(matrix)) ||
-       std::abs(determinant(matrix)) <= kMinimumNormalizationScale)
+    // reject non-invertible estimates using a scale-invariant singular ratio
+    if(homography_singular_value_ratio(matrix) <
+       kMinimumHomographySingularValueRatio)
         return result;
     result.valid = true;
     result.matrix = matrix;
@@ -324,9 +393,17 @@ std::optional<Point2> project_point(const Matrix3& homography,
     const double denominator = homography[6] * point[0] +
                                homography[7] * point[1] +
                                homography[8];
-    // invalid points at or near infinity
+    const double row_norm = std::sqrt(
+        homography[6] * homography[6] + homography[7] * homography[7] +
+        homography[8] * homography[8]);
+    const double point_norm =
+        std::sqrt(point[0] * point[0] + point[1] * point[1] + 1.0);
+    const double minimum_denominator =
+        kMinimumProjectionDenominator * row_norm * point_norm;
+    // reject points at or numerically near infinity
     if(!std::isfinite(denominator) ||
-       std::abs(denominator) <= kMinimumProjectionDenominator) {
+       !std::isfinite(minimum_denominator) ||
+       std::abs(denominator) <= minimum_denominator) {
         return std::nullopt;
     }
 

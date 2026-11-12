@@ -161,6 +161,17 @@ void testHomographyProjection() {
         0.0, 0.0, 0.0};
     check(!image_search::project_point(zero_denominator, {1.0, 2.0}).has_value(),
           "homography accepted a zero projection denominator");
+
+    const image_search::Matrix3 scaled_translation = {
+        1e-20, 0.0, 4e-20,
+        0.0, 1e-20, -2e-20,
+        0.0, 0.0, 1e-20};
+    const auto scaled_projected =
+        image_search::project_point(scaled_translation, {3.0, 5.0});
+    check(scaled_projected.has_value() &&
+              std::abs((*scaled_projected)[0] - 7.0) < 1e-12 &&
+              std::abs((*scaled_projected)[1] - 3.0) < 1e-12,
+          "homography projection is not scale invariant");
 }
 
 // Test normalized DLT estimation and geometric degeneracy rejection.
@@ -211,6 +222,14 @@ void testHomographyEstimation() {
     duplicate.back().source = duplicate.front().source;
     check(!image_search::estimate_homography(duplicate).valid,
           "homography accepted duplicate refit points");
+
+    const std::vector<image_search::PointCorrespondence> nearly_collinear = {
+        {{0.0, 0.0}, {0.0, 0.0}},
+        {{1000000.0, 0.0}, {1000000.0, 0.0}},
+        {{2000000.0, 1.0}, {2000000.0, 1.0}},
+        {{0.0, 1000000.0}, {0.0, 1000000.0}}};
+    check(!image_search::estimate_homography(nearly_collinear).valid,
+          "homography accepted a scale-normalized near-collinear sample");
 }
 
 // Test deterministic RANSAC rejection and refitting with synthetic matches
