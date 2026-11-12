@@ -104,7 +104,21 @@ HomographyResult estimate_homography_ransac(
     HomographyResult best;
     double best_median = std::numeric_limits<double>::infinity();
 
+    // each iteration proposes one homography hypothesis
+    for(std::size_t trial = 0; trial < trial_limit; ++trial) {
+        // sample four distinct accepted matches without replacement
+        std::vector<std::size_t> sample_indices;
+        sample_indices.reserve(kMinimumSampleSize);
+        std::uniform_int_distribution<std::size_t> distribution(
+            0, matches.size() - 1);
+        while(sample_indices.size() < kMinimumSampleSize) {
+            const std::size_t index = distribution(generator);
+            if(std::find(sample_indices.begin(), sample_indices.end(), index) ==
+               sample_indices.end())
+                sample_indices.push_back(index);
+        }
+    }
+
 }
 
-}  // namespace image_search
 }  // namespace image_search
