@@ -162,6 +162,33 @@ void testHomographyProjection() {
           "homography accepted a zero projection denominator");
 }
 
+// Test normalized DLT estimation and geometric degeneracy rejection.
+void testHomographyEstimation() {
+    const std::vector<image_search::PointCorrespondence> correspondences = {
+        {{0.0, 0.0}, {4.0, -2.0}},
+        {{10.0, 0.0}, {14.0, -2.0}},
+        {{0.0, 10.0}, {4.0, 8.0}},
+        {{10.0, 10.0}, {14.0, 8.0}}};
+    const auto result = image_search::estimate_homography(correspondences);
+    check(result.valid, "normalized DLT rejected a valid translation");
+    for(const auto& correspondence : correspondences) {
+        const auto projected = image_search::project_point(
+            result.matrix, correspondence.source);
+        check(projected.has_value(), "estimated homography did not project");
+        check(std::abs((*projected)[0] - correspondence.destination[0]) < 1e-6 &&
+              std::abs((*projected)[1] - correspondence.destination[1]) < 1e-6,
+              "normalized DLT estimated the wrong homography");
+    }
+
+    const std::vector<image_search::PointCorrespondence> collinear = {
+        {{0.0, 0.0}, {0.0, 0.0}},
+        {{1.0, 1.0}, {1.0, 1.0}},
+        {{2.0, 2.0}, {2.0, 2.0}},
+        {{3.0, 3.0}, {3.0, 3.0}}};
+    check(!image_search::estimate_homography(collinear).valid,
+          "normalized DLT accepted collinear points");
+}
+
 }
 
 int main() {
@@ -174,6 +201,7 @@ int main() {
         testLocalFeatures();
         testDescriptorMatching();
         testHomographyProjection();
+        testHomographyEstimation();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;

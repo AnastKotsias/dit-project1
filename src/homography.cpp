@@ -1,34 +1,289 @@
 #include "homography.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 
 namespace image_search {
 namespace {
 
 // minimum valid homogeneous denominator
 constexpr double kMinimumProjectionDenominator = 1e-12;
+// minimum accepted normalization scale
+constexpr double kMinimumNormalizationScale = 1e-12;
+// minimum accepted point separation and triangle area
+constexpr double kMinimumTriangleArea = 1e-10;
+// Jacobi rotation convergence threshold
+constexpr double kMinimumEigenvalueGap = 1e-12;
 
 bool finite_point(const Point2& point) {
     return std::isfinite(point[0]) && std::isfinite(point[1]);
 }
 
+using SymmetricMatrix = std::array<std::array<double, 9>, 9>;
+
+struct Normalization {
+    Point2 center{};
+    double scale = 0.0;
+};
+
+Normalization normalize_points(const std::vector<PointCorrespondence>& points,
+                               bool source) {
+    Normalization result;
+    // Hartley normalization starts by translating the centroid to the origin
+    for(const auto& correspondence : points) {
+        // choose source or destination coordinates
+        const Point2& point = source ? correspondence.source : correspondence.destination;
+        result.center[0] += point[0];
+        result.center[1] += point[1];
+    }
+    result.center[0] /= static_cast<double>(points.size());
+    result.center[1] /= static_cast<double>(points.size());
+
+    // isotropic scale for a mean distance of square root of two
+    double mean_distance = 0.0;
+    for(const auto& correspondence : points) {
+        const Point2& point = source ? correspondence.source : correspondence.destination;
+        const double dx = point[0] - result.center[0];
+        const double dy = point[1] - result.center[1];
+        mean_distance += std::sqrt(dx * dx + dy * dy);
+    }
+    mean_distance /= static_cast<double>(points.size());
+    result.scale = std::sqrt(2.0) / mean_distance;
+    return result;
+}
+
+Point2 normalized_point(const Point2& point, const Normalization& normalization) {
+    // x normalized equals scale times x minus centroid
+    return {(point[0] - normalization.center[0]) * normalization.scale,
+            (point[1] - normalization.center[1]) * normalization.scale};
+}
+
+double triangle_area(const Point2& first, const Point2& second,
+                     const Point2& third) {
+    return std::abs((second[0] - first[0]) * (third[1] - first[1]) -
+                    (second[1] - first[1]) * (third[0] - first[0]));
+}
+
+bool degenerate(const std::vector<Point2>& points) {
+    // repeated points and collinear triples make the DLT system rank deficient
+    for(std::size_t first = 0; first < points.size(); ++first) {
+        for(std::size_t second = first + 1; second < points.size(); ++second) {
+            const double dx = points[first][0] - points[second][0];
+            const double dy = points[first][1] - points[second][1];
+            if(dx * dx + dy * dy < kMinimumTriangleArea)
+                return true;
+            for(std::size_t third = second + 1; third < points.size(); ++third) {
+                if(triangle_area(points[first], points[second], points[third]) <
+                   kMinimumTriangleArea)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::array<double, 9> smallest_eigenvector(SymmetricMatrix matrix) {
+    std::array<std::array<double, 9>, 9> eigenvectors{};
+    for(std::size_t index = 0; index < 9; ++index) {
+        eigenvectors[index][index] = 1.0;
+    }
+
+    // Jacobi rotations diagonalize the symmetric matrix without changing its eigenvalues
+    for(std::size_t iteration = 0; iteration < 9 * 9 * 20; ++iteration) {
+        std::size_t row = 0;
+        std::size_t column = 1;
+        double largest = 0.0;
+        for(std::size_t first = 0; first < 9; ++first) {
+            for(std::size_t second = first + 1; second < 9; ++second) {
+                if(std::abs(matrix[first][second]) > largest) {
+                    largest = std::abs(matrix[first][second]);
+                    row = first;
+                    column = second;
+                }
+            }
+        }
+        if(largest <= kMinimumEigenvalueGap)
+            break;
+
+        // rotation angle that eliminates the largest off-diagonal entry
+        const double angle = 0.5 * std::atan2(
+            2.0 * matrix[row][column],
+            matrix[column][column] - matrix[row][row]);
+        const double cosine = std::cos(angle);
+        const double sine = std::sin(angle);
+        for(std::size_t index = 0; index < 9; ++index) {
+            const double first = matrix[index][row];
+            const double second = matrix[index][column];
+            matrix[index][row] = cosine * first - sine * second;
+            matrix[index][column] = sine * first + cosine * second;
+        }
+        for(std::size_t index = 0; index < 9; ++index) {
+            const double first = matrix[row][index];
+            const double second = matrix[column][index];
+            matrix[row][index] = cosine * first - sine * second;
+            matrix[column][index] = sine * first + cosine * second;
+        }
+        for(std::size_t index = 0; index < 9; ++index) {
+            const double first = eigenvectors[index][row];
+            const double second = eigenvectors[index][column];
+            eigenvectors[index][row] = cosine * first - sine * second;
+            eigenvectors[index][column] = sine * first + cosine * second;
+        }
+    }
+
+    // smallest eigenvalue gives the right singular vector for the DLT null space
+    std::size_t smallest = 0;
+    for(std::size_t index = 1; index < 9; ++index) {
+        if(matrix[index][index] < matrix[smallest][smallest])
+            smallest = index;
+    }
+    std::array<double, 9> result{};
+    for(std::size_t index = 0; index < 9; ++index)
+        result[index] = eigenvectors[index][smallest];
+    return result;
+}
+
+double determinant(const Matrix3& matrix) {
+    // determinant used for singularity validation
+    return matrix[0] * (matrix[4] * matrix[8] - matrix[5] * matrix[7]) -
+           matrix[1] * (matrix[3] * matrix[8] - matrix[5] * matrix[6]) +
+           matrix[2] * (matrix[3] * matrix[7] - matrix[4] * matrix[6]);
+}
+
 }  // namespace
+
+HomographyResult estimate_homography(
+    const std::vector<PointCorrespondence>& correspondences) {
+    HomographyResult result;
+    // four point correspondences provide the minimum eight independent equations
+    if(correspondences.size() < 4)
+        return result;
+
+    // collect and validate both point sets
+    std::vector<Point2> source_points;
+    std::vector<Point2> destination_points;
+    source_points.reserve(correspondences.size());
+    destination_points.reserve(correspondences.size());
+    for(const auto& correspondence : correspondences) {
+        if(!finite_point(correspondence.source) ||
+           !finite_point(correspondence.destination))
+            return result;
+        source_points.push_back(correspondence.source);
+        destination_points.push_back(correspondence.destination);
+    }
+    if(degenerate(source_points) || degenerate(destination_points))
+        return result;
+
+    // zero mean distance produces an undefined normalization transform
+    const auto source_normalization = normalize_points(correspondences, true);
+    const auto destination_normalization = normalize_points(correspondences, false);
+    if(!std::isfinite(source_normalization.scale) ||
+       !std::isfinite(destination_normalization.scale) ||
+       source_normalization.scale <= kMinimumNormalizationScale ||
+       destination_normalization.scale <= kMinimumNormalizationScale)
+        return result;
+
+    // solve A h equals zero through the symmetric normal matrix A transpose A
+    SymmetricMatrix normal{};
+    for(const auto& correspondence : correspondences) {
+        const auto source = normalized_point(correspondence.source,
+                                              source_normalization);
+        const auto destination = normalized_point(correspondence.destination,
+                                                   destination_normalization);
+        // h11 x plus h12 y plus h13 minus u times h31 x plus h32 y plus h33
+        const std::array<double, 9> first = {
+            -source[0], -source[1], -1.0, 0.0, 0.0, 0.0,
+            destination[0] * source[0], destination[0] * source[1],
+            destination[0]};
+        // h21 x plus h22 y plus h23 minus v times h31 x plus h32 y plus h33
+        const std::array<double, 9> second = {
+            0.0, 0.0, 0.0, -source[0], -source[1], -1.0,
+            destination[1] * source[0], destination[1] * source[1],
+            destination[1]};
+        // x and y image equations contributed by one correspondence
+        for(const auto& row : {first, second}) {
+            for(std::size_t first_index = 0; first_index < 9; ++first_index)
+                for(std::size_t second_index = 0; second_index < 9; ++second_index)
+                    normal[first_index][second_index] +=
+                        row[first_index] * row[second_index];
+        }
+    }
+
+    // smallest eigenvector minimizes the algebraic DLT error
+    const auto normalized_matrix = smallest_eigenvector(normal);
+    double norm = 0.0;
+    for(const double value : normalized_matrix)
+        norm += value * value;
+    norm = std::sqrt(norm);
+    if(!std::isfinite(norm) || norm <= kMinimumNormalizationScale)
+        return result;
+
+    // H equals inverse destination transform times normalized H times source transform
+    const double source_scale = source_normalization.scale;
+    const double destination_scale = destination_normalization.scale;
+    const double tx = source_normalization.center[0];
+    const double ty = source_normalization.center[1];
+    const double ux = destination_normalization.center[0];
+    const double uy = destination_normalization.center[1];
+    Matrix3 matrix = {
+        normalized_matrix[0] * source_scale / destination_scale +
+            ux * normalized_matrix[6] * source_scale,
+        normalized_matrix[1] * source_scale / destination_scale +
+            ux * normalized_matrix[7] * source_scale,
+        (normalized_matrix[2] - normalized_matrix[0] * source_scale * tx -
+         normalized_matrix[1] * source_scale * ty) / destination_scale +
+            ux * (normalized_matrix[8] - normalized_matrix[6] * source_scale * tx -
+                  normalized_matrix[7] * source_scale * ty),
+        normalized_matrix[3] * source_scale / destination_scale +
+            uy * normalized_matrix[6] * source_scale,
+        normalized_matrix[4] * source_scale / destination_scale +
+            uy * normalized_matrix[7] * source_scale,
+        (normalized_matrix[5] - normalized_matrix[3] * source_scale * tx -
+         normalized_matrix[4] * source_scale * ty) / destination_scale +
+            uy * (normalized_matrix[8] - normalized_matrix[6] * source_scale * tx -
+                  normalized_matrix[7] * source_scale * ty),
+        normalized_matrix[6] * source_scale,
+        normalized_matrix[7] * source_scale,
+        normalized_matrix[8] - normalized_matrix[6] * source_scale * tx -
+            normalized_matrix[7] * source_scale * ty};
+
+    double matrix_norm = 0.0;
+    for(const double value : matrix)
+        matrix_norm += value * value;
+    matrix_norm = std::sqrt(matrix_norm);
+    if(!std::isfinite(matrix_norm) || matrix_norm <= kMinimumNormalizationScale)
+        return result;
+    // homogeneous matrices are equivalent up to any non-zero scale
+    for(double& value : matrix)
+        value /= matrix_norm;
+    // reject non-invertible estimates
+    if(!std::isfinite(determinant(matrix)) ||
+       std::abs(determinant(matrix)) <= kMinimumNormalizationScale)
+        return result;
+    result.valid = true;
+    result.matrix = matrix;
+    return result;
+}
 
 std::optional<Point2> project_point(const Matrix3& homography,
                                     const Point2& point) {
-    // reject non-finite inputs before homogeneous arithmetic
+    // non-finite input rejection
     if(!finite_point(point))
         return std::nullopt;
+    // reject non-finite matrix coefficients
     for(const double value : homography) {
         if(!std::isfinite(value))
             return std::nullopt;
     }
 
-    // homogeneous projection denominator
+    // projected x and y share the homogeneous denominator
     const double denominator = homography[6] * point[0] +
                                homography[7] * point[1] +
                                homography[8];
-    // points at or too close to infinity cannot be projected reliably
+    // invalid points at or near infinity
     if(!std::isfinite(denominator) ||
        std::abs(denominator) <= kMinimumProjectionDenominator) {
         return std::nullopt;
