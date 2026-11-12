@@ -1,5 +1,6 @@
 #include "dataset.hpp"
 #include "descriptor_matching.hpp"
+#include "geometric_verification.hpp"
 #include "homography.hpp"
 #include "local_features.hpp"
 #include "kmeans.hpp"
@@ -212,6 +213,37 @@ void testHomographyEstimation() {
           "homography accepted duplicate refit points");
 }
 
+// Test deterministic RANSAC rejection and refitting with synthetic matches
+void testHomographyRansac() {
+    std::vector<image_search::DescriptorMatch> matches;
+    const std::vector<image_search::Point2> source = {
+        {0.0, 0.0}, {10.0, 0.0}, {0.0, 10.0}, {10.0, 10.0},
+        {5.0, 3.0}};
+    for(std::size_t index = 0; index < source.size(); ++index) {
+        matches.push_back({source[index],
+                           {source[index][0] + 20.0,
+                            source[index][1] + 10.0},
+                           0.0, index, index});
+    }
+    matches.push_back({{30.0, 30.0}, {2000.0, 1500.0}, 0.0, 5, 5});
+    matches.push_back({{70.0, 50.0}, {150.0, 1800.0}, 0.0, 6, 6});
+
+    image_search::RansacConfig config;
+    config.maximum_trials = 500;
+    const auto first = image_search::estimate_homography_ransac(matches, config);
+    const auto second = image_search::estimate_homography_ransac(matches, config);
+    check(first.valid && first.inlier_indices.size() == 5,
+          "RANSAC did not isolate the synthetic inliers");
+    check(first.inlier_indices == second.inlier_indices &&
+              first.matrix == second.matrix,
+          "RANSAC is not deterministic for a fixed seed");
+    check(first.median_error.has_value() && *first.median_error < config.tau,
+          "RANSAC refit has unexpected reprojection error");
+    checkThrows(
+        [&] { image_search::estimate_homography_ransac(matches, {0.0}); },
+        "RANSAC accepted an invalid reprojection threshold");
+}
+
 }
 
 int main() {
@@ -225,6 +257,7 @@ int main() {
         testDescriptorMatching();
         testHomographyProjection();
         testHomographyEstimation();
+        testHomographyRansac();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;

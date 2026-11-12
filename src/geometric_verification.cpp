@@ -142,7 +142,6 @@ HomographyResult estimate_homography_ransac(
                 inliers.push_back(index);
         }
         const auto median = median_inlier_error(errors, inliers);
-
         // maximize consensus first, then minimize the inlier median
         bool better = !has_best || inliers.size() > best.inlier_indices.size();
         if(has_best && inliers.size() == best.inlier_indices.size()) {
@@ -190,7 +189,6 @@ HomographyResult estimate_homography_ransac(
         if(error < config.tau)
             final_inliers.push_back(index);
     }
-
     // preserve the assignment's minimum-valid-inlier requirement
     if(final_inliers.size() < kMinimumSampleSize)
         return failure;
