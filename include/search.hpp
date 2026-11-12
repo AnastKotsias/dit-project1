@@ -20,6 +20,27 @@ constexpr int kMaxHypercubeProjections = 20;
 // largest IVFPQ code size in bits, since every code is stored in a uint16_t
 constexpr int kMaxPQBits = 16;
 
+// one candidate in the original Assignment 1 ranking
+struct SearchCandidate {
+    // stable index into the database feature and identifier arrays
+    std::size_t database_index = 0;
+    // zero-based position before geometric verification
+    std::size_t original_rank = 0;
+    // identifier associated with database_index
+    std::string id;
+};
+
+// candidate-only search outcome used by Assignment 2 verification
+struct CandidateSearchResult {
+    std::string query_id;
+    // candidates remain in the selected search method's original order
+    std::vector<SearchCandidate> candidates;
+    // candidate-generation time, excluding feature extraction and verification
+    double query_time_ms = 0.0;
+    // distinct database vectors examined by the selected search method
+    std::size_t candidates_examined = 0;
+};
+
 // outcome of one query: the returned ranking, its quality metrics and the time it took
 struct SearchResult {
     std::string query_id;
@@ -52,6 +73,12 @@ public:
 
     // the exact top 10 neighbours of the query, ranked by Euclidean distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+    // the first candidate_count neighbours with their original search ranks
+    CandidateSearchResult candidates(
+        const std::vector<double>& query_bow,
+        const std::string& query_id,
+        std::size_t candidate_count) const;
 };
 
 // locality sensitive hashing with `tables` hash tables, each combining k hash functions of window width w

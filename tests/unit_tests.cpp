@@ -89,6 +89,17 @@ void testExactSearch() {
     check(result.ap_10 == 1.0, "exact search average precision is incorrect");
     check(result.candidates_examined == database.size(), "exact search examined the wrong number of candidates");
 
+    const auto candidates = search.candidates({0.0, 0.0}, "query", 3);
+    check(candidates.query_id == "query" &&
+              candidates.candidates.size() == 3 &&
+              candidates.candidates[0].database_index == 0 &&
+              candidates.candidates[0].original_rank == 0 &&
+              candidates.candidates[0].id == "sequence/2" &&
+              candidates.candidates[2].database_index == 2 &&
+              candidates.candidates_examined == database.size(),
+          "exact candidate retrieval returned the wrong ranking metadata");
+    checkThrows([&] { search.candidates({0.0, 0.0}, "query", 0); },
+                "exact candidate retrieval accepted zero candidates");
     checkThrows([&] { search.search({0.0}, "query", "sequence"); }, "exact search accepted a query with the wrong dimension");
     checkThrows([&] { ExactSearch({}, {}); }, "exact search accepted an empty database");
 }
