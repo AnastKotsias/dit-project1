@@ -1,5 +1,6 @@
 #include "dataset.hpp"
 #include "descriptor_matching.hpp"
+#include "homography.hpp"
 #include "local_features.hpp"
 #include "kmeans.hpp"
 #include "search.hpp"
@@ -143,6 +144,24 @@ void testDescriptorMatching() {
           "descriptor matching accepted a candidate with one descriptor");
 }
 
+// Test homography projection and invalid denominator handling.
+void testHomographyProjection() {
+    const image_search::Matrix3 translation = {
+        1.0, 0.0, 4.0,
+        0.0, 1.0, -2.0,
+        0.0, 0.0, 1.0};
+    const auto projected = image_search::project_point(translation, {3.0, 5.0});
+    check(projected.has_value() && (*projected == image_search::Point2{7.0, 3.0}),
+          "homography projection is incorrect");
+
+    const image_search::Matrix3 zero_denominator = {
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0};
+    check(!image_search::project_point(zero_denominator, {1.0, 2.0}).has_value(),
+          "homography accepted a zero projection denominator");
+}
+
 }
 
 int main() {
@@ -154,6 +173,7 @@ int main() {
         testDatasetPaths();
         testLocalFeatures();
         testDescriptorMatching();
+        testHomographyProjection();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;

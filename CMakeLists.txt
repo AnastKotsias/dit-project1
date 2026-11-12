@@ -25,6 +25,7 @@ if(BUILD_SEARCH_APP)
         src/image_features.cpp
         src/local_features.cpp
         src/descriptor_matching.cpp
+        src/homography.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
@@ -57,6 +58,7 @@ if(BUILD_TESTING)
         src/image_features.cpp
         src/local_features.cpp
         src/descriptor_matching.cpp
+        src/homography.cpp
         src/kmeans.cpp
         src/search/common.cpp
         src/search/exact.cpp
