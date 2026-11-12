@@ -4,7 +4,6 @@
 #include <array>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 
 namespace image_search {
 namespace {
@@ -22,7 +21,8 @@ bool finite_point(const Point2& point) {
     return std::isfinite(point[0]) && std::isfinite(point[1]);
 }
 
-using SymmetricMatrix = std::array<std::array<double, 9>, 9>;
+using DltRow = std::array<double, 9>;
+using DltMatrix = std::vector<DltRow>;
 
 struct Normalization {
     Point2 center{};
@@ -85,64 +85,76 @@ bool degenerate(const std::vector<Point2>& points) {
     return false;
 }
 
-std::array<double, 9> smallest_eigenvector(SymmetricMatrix matrix) {
-    std::array<std::array<double, 9>, 9> eigenvectors{};
+std::array<double, 9> smallest_right_singular_vector(const DltMatrix& matrix) {
+    DltMatrix transformed = matrix;
+    std::array<std::array<double, 9>, 9> right_vectors{};
     for(std::size_t index = 0; index < 9; ++index) {
-        eigenvectors[index][index] = 1.0;
+        right_vectors[index][index] = 1.0;
     }
 
-    // Jacobi rotations diagonalize the symmetric matrix without changing its eigenvalues
+    // one sided Jacobi SVD orthogonalizes the columns of A
     for(std::size_t iteration = 0; iteration < 9 * 9 * 20; ++iteration) {
-        std::size_t row = 0;
-        std::size_t column = 1;
-        double largest = 0.0;
+        double largest_correlation = 0.0;
         for(std::size_t first = 0; first < 9; ++first) {
             for(std::size_t second = first + 1; second < 9; ++second) {
-                if(std::abs(matrix[first][second]) > largest) {
-                    largest = std::abs(matrix[first][second]);
-                    row = first;
-                    column = second;
+                double first_norm = 0.0;
+                double second_norm = 0.0;
+                double correlation = 0.0;
+                for(const auto& row : transformed) {
+                    first_norm += row[first] * row[first];
+                    second_norm += row[second] * row[second];
+                    correlation += row[first] * row[second];
+                }
+                // zero columns cannot contribute a Jacobi rotation
+                if(first_norm == 0.0 || second_norm == 0.0)
+                    continue;
+                largest_correlation = std::max(
+                    largest_correlation,
+                    std::abs(correlation) /
+                        std::sqrt(first_norm * second_norm));
+                if(std::abs(correlation) <= kMinimumEigenvalueGap)
+                    continue;
+
+                // rotation angle that removes the column correlation
+                const double angle = 0.5 * std::atan2(
+                    2.0 * correlation, second_norm - first_norm);
+                const double cosine = std::cos(angle);
+                const double sine = std::sin(angle);
+                for(auto& row : transformed) {
+                    const double first_value = row[first];
+                    const double second_value = row[second];
+                    row[first] = cosine * first_value - sine * second_value;
+                    row[second] = sine * first_value + cosine * second_value;
+                }
+                for(std::size_t index = 0; index < 9; ++index) {
+                    const double first_value = right_vectors[index][first];
+                    const double second_value = right_vectors[index][second];
+                    right_vectors[index][first] =
+                        cosine * first_value - sine * second_value;
+                    right_vectors[index][second] =
+                        sine * first_value + cosine * second_value;
                 }
             }
         }
-        if(largest <= kMinimumEigenvalueGap)
+        if(largest_correlation <= kMinimumEigenvalueGap)
             break;
-
-        // rotation angle that eliminates the largest off-diagonal entry
-        const double angle = 0.5 * std::atan2(
-            2.0 * matrix[row][column],
-            matrix[column][column] - matrix[row][row]);
-        const double cosine = std::cos(angle);
-        const double sine = std::sin(angle);
-        for(std::size_t index = 0; index < 9; ++index) {
-            const double first = matrix[index][row];
-            const double second = matrix[index][column];
-            matrix[index][row] = cosine * first - sine * second;
-            matrix[index][column] = sine * first + cosine * second;
-        }
-        for(std::size_t index = 0; index < 9; ++index) {
-            const double first = matrix[row][index];
-            const double second = matrix[column][index];
-            matrix[row][index] = cosine * first - sine * second;
-            matrix[column][index] = sine * first + cosine * second;
-        }
-        for(std::size_t index = 0; index < 9; ++index) {
-            const double first = eigenvectors[index][row];
-            const double second = eigenvectors[index][column];
-            eigenvectors[index][row] = cosine * first - sine * second;
-            eigenvectors[index][column] = sine * first + cosine * second;
-        }
     }
 
-    // smallest eigenvalue gives the right singular vector for the DLT null space
+    // smallest column norm identifies the right singular vector for sigma nine
     std::size_t smallest = 0;
-    for(std::size_t index = 1; index < 9; ++index) {
-        if(matrix[index][index] < matrix[smallest][smallest])
+    double smallest_norm = std::numeric_limits<double>::infinity();
+    for(std::size_t index = 0; index < 9; ++index) {
+        double norm = 0.0;
+        for(const auto& row : transformed)
+            norm += row[index] * row[index];
+        if(norm < smallest_norm) {
+            smallest_norm = norm;
             smallest = index;
+        }
     }
     std::array<double, 9> result{};
     for(std::size_t index = 0; index < 9; ++index)
-        result[index] = eigenvectors[index][smallest];
+        result[index] = right_vectors[index][smallest];
     return result;
 }
 
@@ -186,34 +198,31 @@ HomographyResult estimate_homography(
        destination_normalization.scale <= kMinimumNormalizationScale)
         return result;
 
-    // solve A h equals zero through the symmetric normal matrix A transpose A
-    SymmetricMatrix normal{};
+    // explicit DLT matrix with two rows for each correspondence
+    DltMatrix dlt_matrix;
+    dlt_matrix.reserve(2 * correspondences.size());
     for(const auto& correspondence : correspondences) {
         const auto source = normalized_point(correspondence.source,
                                               source_normalization);
         const auto destination = normalized_point(correspondence.destination,
                                                    destination_normalization);
         // h11 x plus h12 y plus h13 minus u times h31 x plus h32 y plus h33
-        const std::array<double, 9> first = {
+        const DltRow first = {
             -source[0], -source[1], -1.0, 0.0, 0.0, 0.0,
             destination[0] * source[0], destination[0] * source[1],
             destination[0]};
         // h21 x plus h22 y plus h23 minus v times h31 x plus h32 y plus h33
-        const std::array<double, 9> second = {
+        const DltRow second = {
             0.0, 0.0, 0.0, -source[0], -source[1], -1.0,
             destination[1] * source[0], destination[1] * source[1],
             destination[1]};
-        // x and y image equations contributed by one correspondence
-        for(const auto& row : {first, second}) {
-            for(std::size_t first_index = 0; first_index < 9; ++first_index)
-                for(std::size_t second_index = 0; second_index < 9; ++second_index)
-                    normal[first_index][second_index] +=
-                        row[first_index] * row[second_index];
-        }
+        dlt_matrix.push_back(first);
+        dlt_matrix.push_back(second);
     }
 
-    // smallest eigenvector minimizes the algebraic DLT error
-    const auto normalized_matrix = smallest_eigenvector(normal);
+    // SVD A equals U Sigma V transpose
+    const auto normalized_matrix =
+        smallest_right_singular_vector(dlt_matrix);
     double norm = 0.0;
     for(const double value : normalized_matrix)
         norm += value * value;
