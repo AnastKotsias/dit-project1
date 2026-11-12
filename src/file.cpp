@@ -44,5 +44,39 @@ std::optional<double> median_inlier_error(
     return (inlier_errors[middle - 1] + inlier_errors[middle]) / 2.0;
 }
 
+// update the maximum number of trials from the current inlier ratio
+std::size_t adaptive_limit(std::size_t current_limit,
+                           std::size_t inlier_count,
+                           std::size_t match_count,
+                           double confidence,
+                           std::size_t completed_trials) {
+    const double inlier_ratio =
+        static_cast<double>(inlier_count) / static_cast<double>(match_count);
+    // zero inliers provide no estimate of the probability of a clean sample
+    if(inlier_ratio <= 0.0)
+        return current_limit;
+    // a perfect hypothesis needs no additional trials
+    if(inlier_ratio >= 1.0)
+        return completed_trials;
+
+    // four correspondences are needed for a homography hypothesis
+    const double sample_probability = std::pow(inlier_ratio, 4.0);
+    // log1p avoids loss of precision when the sample probability is small
+    const double denominator = std::log1p(-sample_probability);
+    const double numerator = std::log1p(-confidence);
+    if(!std::isfinite(numerator) || !std::isfinite(denominator) ||
+       denominator == 0.0)
+        return current_limit;
+
+    // invert p = 1 - (1 - w^4)^T and round upward
+    const double required_trials = std::ceil(numerator / denominator);
+    if(!std::isfinite(required_trials) || required_trials < 1.0)
+        return current_limit;
+    const auto required = static_cast<std::size_t>(
+        std::min(required_trials,
+                 static_cast<double>(std::numeric_limits<std::size_t>::max())));
+    return std::min(current_limit, std::max(required, completed_trials));
+}
+
 }  // namespace
 }  // namespace image_search
