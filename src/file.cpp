@@ -117,6 +117,51 @@ HomographyResult estimate_homography_ransac(
                sample_indices.end())
                 sample_indices.push_back(index);
         }
+
+        // convert the sampled matches to point correspondences for normalized DLT
+        std::vector<PointCorrespondence> sample;
+        sample.reserve(kMinimumSampleSize);
+        for(const std::size_t index : sample_indices)
+            sample.push_back({matches[index].query_point,
+                              matches[index].candidate_point});
+        const auto hypothesis = estimate_homography(sample);
+        // duplicate, collinear, or numerically invalid samples are discarded
+        if(!hypothesis.valid)
+            continue;
+
+        // classify every original match using the strict error threshold
+        std::vector<double> errors;
+        errors.reserve(matches.size());
+        std::vector<std::size_t> inliers;
+        inliers.reserve(matches.size());
+        for(std::size_t index = 0; index < matches.size(); ++index) {
+            const double error = reprojection_error(matches[index],
+                                                    hypothesis.matrix);
+            errors.push_back(error);
+            if(error < config.tau)
+                inliers.push_back(index);
+        }
+        const auto median = median_inlier_error(errors, inliers);
+
+        // maximize consensus first, then minimize the inlier median
+        bool better = !has_best || inliers.size() > best.inlier_indices.size();
+        if(has_best && inliers.size() == best.inlier_indices.size()) {
+            better = median.value_or(std::numeric_limits<double>::infinity()) <
+                      best_median;
+        }
+        if(!better)
+            continue;
+
+        has_best = true;
+        best = hypothesis;
+        best.inlier_indices = std::move(inliers);
+        best.median_error = median;
+        best_median = median.value_or(std::numeric_limits<double>::infinity());
+        if(config.adaptive)
+            // improve the stopping bound only after a better hypothesis
+            trial_limit = adaptive_limit(trial_limit, best.inlier_indices.size(),
+                                          matches.size(), config.confidence,
+                                          trial + 1);
     }
 
 }
