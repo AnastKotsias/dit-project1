@@ -164,6 +164,42 @@ HomographyResult estimate_homography_ransac(
                                           trial + 1);
     }
 
+    // a valid refit requires at least four inliers
+    if(!has_best || best.inlier_indices.size() < kMinimumSampleSize)
+        return failure;
+
+    // refit only from the best hypothesis's inliers
+    std::vector<PointCorrespondence> refit_correspondences;
+    refit_correspondences.reserve(best.inlier_indices.size());
+    for(const std::size_t index : best.inlier_indices)
+        refit_correspondences.push_back(
+            {matches[index].query_point, matches[index].candidate_point});
+    const auto refit = estimate_homography(refit_correspondences);
+    // the consensus set may still be numerically unsuitable for refitting
+    if(!refit.valid)
+        return failure;
+
+    // recompute errors for all original matches after refitting
+    std::vector<double> final_errors;
+    final_errors.reserve(matches.size());
+    std::vector<std::size_t> final_inliers;
+    final_inliers.reserve(matches.size());
+    for(std::size_t index = 0; index < matches.size(); ++index) {
+        const double error = reprojection_error(matches[index], refit.matrix);
+        final_errors.push_back(error);
+        if(error < config.tau)
+            final_inliers.push_back(index);
+    }
+
+    // preserve the assignment's minimum-valid-inlier requirement
+    if(final_inliers.size() < kMinimumSampleSize)
+        return failure;
+
+    HomographyResult result = refit;
+    result.inlier_indices = std::move(final_inliers);
+    result.median_error = median_inlier_error(final_errors,
+                                              result.inlier_indices);
+    return result;
 }
 
 }  // namespace image_search
