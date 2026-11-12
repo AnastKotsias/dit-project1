@@ -79,4 +79,32 @@ std::size_t adaptive_limit(std::size_t current_limit,
 }
 
 }  // namespace
+
+HomographyResult estimate_homography_ransac(
+    const std::vector<DescriptorMatch>& matches,
+    const RansacConfig& config) {
+    if(!std::isfinite(config.tau) || config.tau <= 0.0)
+        throw std::invalid_argument("tau must be finite and positive");
+    if(config.maximum_trials == 0)
+        throw std::invalid_argument("maximum_trials must be positive");
+    if(!std::isfinite(config.confidence) || config.confidence <= 0.0 ||
+       config.confidence >= 1.0)
+        throw std::invalid_argument(
+            "confidence must be finite and strictly between 0 and 1");
+
+    HomographyResult failure;
+    // RANSAC cannot form its minimum projective sample otherwise
+    if(matches.size() < kMinimumSampleSize)
+        return failure;
+
+    std::mt19937_64 generator(config.seed);
+    // the adaptive limit can only reduce the configured maximum
+    std::size_t trial_limit = config.maximum_trials;
+    bool has_best = false;
+    HomographyResult best;
+    double best_median = std::numeric_limits<double>::infinity();
+
+}
+
+}  // namespace image_search
 }  // namespace image_search
