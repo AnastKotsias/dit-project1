@@ -14,6 +14,8 @@ constexpr double kMinimumProjectionDenominator = 1e-12;
 constexpr double kMinimumNormalizationScale = 1e-12;
 // minimum accepted point separation and triangle area
 constexpr double kMinimumTriangleArea = 1e-10;
+// minimum relative second-smallest singular value for four points
+constexpr double kMinimumRelativeSigma8Squared = 1e-8;
 // Jacobi rotation convergence threshold
 constexpr double kMinimumEigenvalueGap = 1e-12;
 
@@ -67,14 +69,23 @@ double triangle_area(const Point2& first, const Point2& second,
                     (second[1] - first[1]) * (third[0] - first[0]));
 }
 
-bool degenerate(const std::vector<Point2>& points) {
-    // repeated points and collinear triples make the DLT system rank deficient
+bool has_duplicate_points(const std::vector<Point2>& points) {
+    // repeated points reduce the rank of the DLT system
     for(std::size_t first = 0; first < points.size(); ++first) {
         for(std::size_t second = first + 1; second < points.size(); ++second) {
             const double dx = points[first][0] - points[second][0];
             const double dy = points[first][1] - points[second][1];
             if(dx * dx + dy * dy < kMinimumTriangleArea)
                 return true;
+        }
+    }
+    return false;
+}
+
+bool has_collinear_triple(const std::vector<Point2>& points) {
+    // collinear triples invalidate a four-point projective sample
+    for(std::size_t first = 0; first < points.size(); ++first) {
+        for(std::size_t second = first + 1; second < points.size(); ++second) {
             for(std::size_t third = second + 1; third < points.size(); ++third) {
                 if(triangle_area(points[first], points[second], points[third]) <
                    kMinimumTriangleArea)
@@ -85,7 +96,12 @@ bool degenerate(const std::vector<Point2>& points) {
     return false;
 }
 
-std::array<double, 9> smallest_right_singular_vector(const DltMatrix& matrix) {
+struct SvdResult {
+    std::array<double, 9> right_singular_vector{};
+    std::array<double, 9> singular_values_squared{};
+};
+
+SvdResult compute_svd(const DltMatrix& matrix) {
     DltMatrix transformed = matrix;
     std::array<std::array<double, 9>, 9> right_vectors{};
     for(std::size_t index = 0; index < 9; ++index) {
@@ -140,21 +156,26 @@ std::array<double, 9> smallest_right_singular_vector(const DltMatrix& matrix) {
             break;
     }
 
+    // column norms are squared singular values after orthogonalization
+    std::array<double, 9> singular_values_squared{};
+    for(std::size_t index = 0; index < 9; ++index) {
+        for(const auto& row : transformed)
+            singular_values_squared[index] += row[index] * row[index];
+    }
+
     // smallest column norm identifies the right singular vector for sigma nine
     std::size_t smallest = 0;
     double smallest_norm = std::numeric_limits<double>::infinity();
     for(std::size_t index = 0; index < 9; ++index) {
-        double norm = 0.0;
-        for(const auto& row : transformed)
-            norm += row[index] * row[index];
-        if(norm < smallest_norm) {
-            smallest_norm = norm;
+        if(singular_values_squared[index] < smallest_norm) {
+            smallest_norm = singular_values_squared[index];
             smallest = index;
         }
     }
-    std::array<double, 9> result{};
+    SvdResult result;
     for(std::size_t index = 0; index < 9; ++index)
-        result[index] = right_vectors[index][smallest];
+        result.right_singular_vector[index] = right_vectors[index][smallest];
+    result.singular_values_squared = singular_values_squared;
     return result;
 }
 
@@ -186,7 +207,12 @@ HomographyResult estimate_homography(
         source_points.push_back(correspondence.source);
         destination_points.push_back(correspondence.destination);
     }
-    if(degenerate(source_points) || degenerate(destination_points))
+    if(has_duplicate_points(source_points) ||
+       has_duplicate_points(destination_points))
+        return result;
+    if(correspondences.size() == 4 &&
+       (has_collinear_triple(source_points) ||
+        has_collinear_triple(destination_points)))
         return result;
 
     // zero mean distance produces an undefined normalization transform
@@ -221,8 +247,14 @@ HomographyResult estimate_homography(
     }
 
     // SVD A equals U Sigma V transpose
-    const auto normalized_matrix =
-        smallest_right_singular_vector(dlt_matrix);
+    const auto svd = compute_svd(dlt_matrix);
+    const auto normalized_matrix = svd.right_singular_vector;
+    auto singular_values_squared = svd.singular_values_squared;
+    std::sort(singular_values_squared.begin(), singular_values_squared.end());
+    if(singular_values_squared[8] <= 0.0 ||
+       singular_values_squared[1] /
+           singular_values_squared[8] < kMinimumRelativeSigma8Squared)
+        return result;
     double norm = 0.0;
     for(const double value : normalized_matrix)
         norm += value * value;

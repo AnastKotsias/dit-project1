@@ -187,6 +187,29 @@ void testHomographyEstimation() {
         {{3.0, 3.0}, {3.0, 3.0}}};
     check(!image_search::estimate_homography(collinear).valid,
           "normalized DLT accepted collinear points");
+
+    const std::vector<image_search::PointCorrespondence> refit = {
+        {{0.0, 0.0}, {4.0, -2.0}},
+        {{1.0, 0.0}, {5.0, -2.0}},
+        {{2.0, 0.0}, {6.0, -2.0}},
+        {{0.0, 1.0}, {4.0, -1.0}},
+        {{1.0, 1.0}, {5.0, -1.0}}};
+    check(image_search::estimate_homography(refit).valid,
+          "homography refit rejected valid collinear inliers");
+
+    const std::vector<image_search::PointCorrespondence> collinear_refit = {
+        {{0.0, 0.0}, {4.0, -2.0}},
+        {{1.0, 1.0}, {5.0, -1.0}},
+        {{2.0, 2.0}, {6.0, 0.0}},
+        {{3.0, 3.0}, {7.0, 1.0}},
+        {{4.0, 4.0}, {8.0, 2.0}}};
+    check(!image_search::estimate_homography(collinear_refit).valid,
+          "homography accepted an all-collinear refit");
+
+    auto duplicate = refit;
+    duplicate.back().source = duplicate.front().source;
+    check(!image_search::estimate_homography(duplicate).valid,
+          "homography accepted duplicate refit points");
 }
 
 }
