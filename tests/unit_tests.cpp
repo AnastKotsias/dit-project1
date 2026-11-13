@@ -6,6 +6,7 @@
 #include "kmeans.hpp"
 #include "search.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -33,6 +34,34 @@ void checkThrows(const std::function<void()>& operation, const std::string& mess
         threw = true;
     }
     check(threw, message);
+}
+
+// Check that H equals the expected matrix up to scale. The expected matrix has h33 = 1.
+bool equalUpToScale(const image_search::Matrix3& estimated,
+                    const image_search::Matrix3& expected) {
+    // H ~ lambda H, fix lambda by h33 = 1
+    if(std::abs(estimated[8]) < 1e-12)
+        return false;
+    for(std::size_t index = 0; index < 9; ++index) {
+        if(std::abs(estimated[index] / estimated[8] - expected[index]) > 1e-6)
+            return false;
+    }
+    return true;
+}
+
+// Check that H maps every source point onto its destination with near-zero error.
+bool reprojectsExactly(
+    const image_search::Matrix3& homography,
+    const std::vector<image_search::PointCorrespondence>& correspondences) {
+    for(const auto& correspondence : correspondences) {
+        const auto projected =
+            image_search::project_point(homography, correspondence.source);
+        if(!projected.has_value() ||
+           std::hypot((*projected)[0] - correspondence.destination[0],
+                      (*projected)[1] - correspondence.destination[1]) > 1e-6)
+            return false;
+    }
+    return true;
 }
 
 // Test the Matrix class and the squared_distance function.
@@ -207,21 +236,35 @@ void testHomographyProjection() {
 
 // Test normalized DLT estimation and geometric degeneracy rejection.
 void testHomographyEstimation() {
+    // tutorial check 1: p'_i = p_i gives H ~ I3
+    const std::vector<image_search::PointCorrespondence> identity = {
+        {{1.0, 2.0}, {1.0, 2.0}},
+        {{40.0, 5.0}, {40.0, 5.0}},
+        {{8.0, 30.0}, {8.0, 30.0}},
+        {{35.0, 42.0}, {35.0, 42.0}}};
+    const auto identity_result = image_search::estimate_homography(identity);
+    check(identity_result.valid &&
+              equalUpToScale(identity_result.matrix,
+                             {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0}),
+          "normalized DLT did not estimate H ~ I3 for the identity");
+    check(reprojectsExactly(identity_result.matrix, identity),
+          "identity homography has non-zero reprojection error");
+
+    // tutorial check 2: (x, y) <-> (x + 20, y + 10)
     const std::vector<image_search::PointCorrespondence> correspondences = {
-        {{0.0, 0.0}, {4.0, -2.0}},
-        {{10.0, 0.0}, {14.0, -2.0}},
-        {{0.0, 10.0}, {4.0, 8.0}},
-        {{10.0, 10.0}, {14.0, 8.0}}};
+        {{0.0, 0.0}, {20.0, 10.0}},
+        {{10.0, 0.0}, {30.0, 10.0}},
+        {{0.0, 10.0}, {20.0, 20.0}},
+        {{10.0, 10.0}, {30.0, 20.0}}};
+    const image_search::Matrix3 translation = {
+        1.0, 0.0, 20.0,
+        0.0, 1.0, 10.0,
+        0.0, 0.0, 1.0};
     const auto result = image_search::estimate_homography(correspondences);
-    check(result.valid, "normalized DLT rejected a valid translation");
-    for(const auto& correspondence : correspondences) {
-        const auto projected = image_search::project_point(
-            result.matrix, correspondence.source);
-        check(projected.has_value(), "estimated homography did not project");
-        check(std::abs((*projected)[0] - correspondence.destination[0]) < 1e-6 &&
-              std::abs((*projected)[1] - correspondence.destination[1]) < 1e-6,
-              "normalized DLT estimated the wrong homography");
-    }
+    check(result.valid && equalUpToScale(result.matrix, translation),
+          "normalized DLT did not estimate the known translation");
+    check(reprojectsExactly(result.matrix, correspondences),
+          "translation homography has non-zero reprojection error");
 
     check(!image_search::is_degenerate_sample(correspondences),
           "a non-degenerate minimal sample was rejected");
@@ -242,12 +285,12 @@ void testHomographyEstimation() {
 
     // collinear triple in the destination only
     auto one_image_collinear = correspondences;
-    one_image_collinear[2].destination = {9.0, -2.0};
+    one_image_collinear[2].destination = {25.0, 10.0};
     check(image_search::is_degenerate_sample(one_image_collinear),
           "minimal sample check accepted a collinear triple in one image");
 
     auto five_points = correspondences;
-    five_points.push_back({{5.0, 3.0}, {9.0, 1.0}});
+    five_points.push_back({{5.0, 3.0}, {25.0, 13.0}});
     checkThrows([&] { image_search::is_degenerate_sample(five_points); },
                 "minimal sample check accepted more than four correspondences");
 
@@ -310,24 +353,32 @@ void testHomographyEstimation() {
 // Test deterministic RANSAC rejection and refitting with synthetic matches
 void testHomographyRansac() {
     std::vector<image_search::DescriptorMatch> matches;
+    // tutorial check: 5 correct pairs (x, y) -> (x + 20, y + 10)
+    // spread around the outliers, so no projective H fits both within tau
     const std::vector<image_search::Point2> source = {
-        {0.0, 0.0}, {10.0, 0.0}, {0.0, 10.0}, {10.0, 10.0},
-        {5.0, 3.0}};
+        {0.0, 0.0}, {100.0, 0.0}, {0.0, 100.0}, {100.0, 100.0},
+        {50.0, 30.0}};
     for(std::size_t index = 0; index < source.size(); ++index) {
         matches.push_back({source[index],
                            {source[index][0] + 20.0,
                             source[index][1] + 10.0},
                            0.0, index, index});
     }
-    matches.push_back({{30.0, 30.0}, {2000.0, 1500.0}, 0.0, 5, 5});
-    matches.push_back({{70.0, 50.0}, {150.0, 1800.0}, 0.0, 6, 6});
+    // tutorial outliers
+    matches.push_back({{30.0, 30.0}, {200.0, 150.0}, 0.0, 5, 5});
+    matches.push_back({{70.0, 50.0}, {15.0, 180.0}, 0.0, 6, 6});
 
     image_search::RansacConfig config;
     config.maximum_trials = 500;
     const auto first = image_search::estimate_homography_ransac(matches, config);
     const auto second = image_search::estimate_homography_ransac(matches, config);
-    check(first.valid && first.inlier_indices.size() == 5,
+    // 5 correct pairs are inliers, matches 5 and 6 are outliers
+    const std::vector<std::size_t> expected_inliers = {0, 1, 2, 3, 4};
+    check(first.valid && first.inlier_indices == expected_inliers,
           "RANSAC did not isolate the synthetic inliers");
+    check(equalUpToScale(first.matrix,
+                         {1.0, 0.0, 20.0, 0.0, 1.0, 10.0, 0.0, 0.0, 1.0}),
+          "RANSAC did not estimate the expected translation");
     check(first.inlier_indices == second.inlier_indices &&
               first.matrix == second.matrix,
           "RANSAC is not deterministic for a fixed seed");
