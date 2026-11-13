@@ -14,18 +14,16 @@ namespace {
 
 // minimum valid homogeneous denominator
 constexpr double kMinimumProjectionDenominator = 1e-12;
-// minimum accepted normalization scale
-constexpr double kMinimumNormalizationScale = 1e-12;
+// minimum Frobenius norm of H
+constexpr double kMinimumMatrixNorm = 1e-12;
+// minimum mean centroid distance in pixels, above rounding noise
+constexpr double kMinimumMeanDistance = 1e-8;
 // minimum accepted squared distance between distinct points
 constexpr double kMinimumPointSeparationSquared = 1e-10;
 // minimum normalized triangle area for non-collinearity
 constexpr double kMinimumCollinearity = 1e-4;
-// minimum ratio sigma8 / sigma1 of the DLT matrix, same as the former 1e-8 on squares
-constexpr double kMinimumRelativeSigma8 = 1e-4;
-// minimum scale-invariant singular-value ratio for an estimated homography
+// epsilon_rank, minimum sigma3 / sigma1 of H
 constexpr double kMinimumHomographySingularValueRatio = 1e-12;
-// Jacobi rotation convergence threshold
-constexpr double kMinimumEigenvalueGap = 1e-12;
 
 bool finite_point(const Point2& point) {
     return std::isfinite(point[0]) && std::isfinite(point[1]);
@@ -33,6 +31,8 @@ bool finite_point(const Point2& point) {
 
 struct Normalization {
     Point2 center{};
+    // mean distance d from the centroid
+    double mean_distance = 0.0;
     double scale = 0.0;
 };
 
@@ -49,16 +49,17 @@ Normalization normalize_points(const std::vector<PointCorrespondence>& points,
     result.center[0] /= static_cast<double>(points.size());
     result.center[1] /= static_cast<double>(points.size());
 
-    // isotropic scale for a mean distance of square root of two
-    double mean_distance = 0.0;
+    // mean distance d from the centroid
     for(const auto& correspondence : points) {
         const Point2& point = source ? correspondence.source : correspondence.destination;
         const double dx = point[0] - result.center[0];
         const double dy = point[1] - result.center[1];
-        mean_distance += std::sqrt(dx * dx + dy * dy);
+        result.mean_distance += std::sqrt(dx * dx + dy * dy);
     }
-    mean_distance /= static_cast<double>(points.size());
-    result.scale = std::sqrt(2.0) / mean_distance;
+    result.mean_distance /= static_cast<double>(points.size());
+    // s = sqrt(2) / d, near-zero d rejected by the caller
+    if(result.mean_distance > kMinimumMeanDistance)
+        result.scale = std::sqrt(2.0) / result.mean_distance;
     return result;
 }
 
@@ -114,79 +115,41 @@ bool has_collinear_triple(const std::vector<Point2>& points) {
     return false;
 }
 
-double homography_singular_value_ratio(const Matrix3& matrix) {
-    // form H transpose H whose eigenvalues are squared singular values
-    std::array<std::array<double, 3>, 3> gram{};
-    for(std::size_t row = 0; row < 3; ++row) {
-        for(std::size_t first = 0; first < 3; ++first) {
-            for(std::size_t second = 0; second < 3; ++second)
-                gram[first][second] +=
-                    matrix[row * 3 + first] * matrix[row * 3 + second];
-        }
-    }
+bool is_invertible_homography(const Matrix3& matrix) {
+    // singular values of H itself, sigma1 >= sigma2 >= sigma3 >= 0
+    // H^T H would square the condition number
+    Eigen::Matrix3d homography;
+    homography << matrix[0], matrix[1], matrix[2],
+                  matrix[3], matrix[4], matrix[5],
+                  matrix[6], matrix[7], matrix[8];
+    // singular values only, no U or V
+    const Eigen::JacobiSVD<Eigen::Matrix3d> svd(homography);
+    const Eigen::Vector3d& singular_values = svd.singularValues();
+    if(!singular_values.allFinite())
+        return false;
 
-    // Jacobi diagonalization of the symmetric three-by-three matrix
-    for(std::size_t iteration = 0; iteration < 30; ++iteration) {
-        std::size_t first = 0;
-        std::size_t second = 1;
-        if(std::abs(gram[0][2]) > std::abs(gram[first][second])) {
-            first = 0;
-            second = 2;
-        }
-        if(std::abs(gram[1][2]) > std::abs(gram[first][second])) {
-            first = 1;
-            second = 2;
-        }
-        if(std::abs(gram[first][second]) <= kMinimumEigenvalueGap)
-            break;
-
-        const double angle = 0.5 * std::atan2(
-            2.0 * gram[first][second],
-            gram[second][second] - gram[first][first]);
-        const double cosine = std::cos(angle);
-        const double sine = std::sin(angle);
-        for(std::size_t index = 0; index < 3; ++index) {
-            const double first_value = gram[index][first];
-            const double second_value = gram[index][second];
-            gram[index][first] = cosine * first_value - sine * second_value;
-            gram[index][second] = sine * first_value + cosine * second_value;
-        }
-        for(std::size_t index = 0; index < 3; ++index) {
-            const double first_value = gram[first][index];
-            const double second_value = gram[second][index];
-            gram[first][index] = cosine * first_value - sine * second_value;
-            gram[second][index] = sine * first_value + cosine * second_value;
-        }
-    }
-
-    double smallest = std::numeric_limits<double>::infinity();
-    double largest = 0.0;
-    for(std::size_t index = 0; index < 3; ++index) {
-        if(!std::isfinite(gram[index][index]))
-            return 0.0;
-        const double eigenvalue = std::max(0.0, gram[index][index]);
-        smallest = std::min(smallest, eigenvalue);
-        largest = std::max(largest, eigenvalue);
-    }
-    if(largest <= 0.0)
-        return 0.0;
-    return std::sqrt(smallest / largest);
+    // sigma1 > 0 and sigma3 / sigma1 > epsilon_rank
+    // scale invariant: lambda H has singular values |lambda| sigma_i
+    const double largest = singular_values(0);
+    const double smallest = singular_values(2);
+    return largest > 0.0 &&
+           smallest / largest > kMinimumHomographySingularValueRatio;
 }
 
 }  // namespace
 
 bool is_degenerate_sample(const std::vector<PointCorrespondence>& sample) {
-    // the checks are defined for the four-point minimal sample only
+    // minimal sample only
     if(sample.size() != 4)
         throw std::invalid_argument("a minimal homography sample has four correspondences");
 
-    // split the sample into its query-image and candidate-image points
+    // query-image and candidate-image points
     std::vector<Point2> source_points;
     std::vector<Point2> destination_points;
     source_points.reserve(sample.size());
     destination_points.reserve(sample.size());
     for(const auto& correspondence : sample) {
-        // NaN would pass every distance comparison below
+        // NaN passes every comparison below
         if(!finite_point(correspondence.source) ||
            !finite_point(correspondence.destination))
             return true;
@@ -194,11 +157,11 @@ bool is_degenerate_sample(const std::vector<PointCorrespondence>& sample) {
         destination_points.push_back(correspondence.destination);
     }
 
-    // four distinct points are needed in each image
+    // four distinct points per image
     if(has_duplicate_points(source_points) ||
        has_duplicate_points(destination_points))
         return true;
-    // three collinear points leave fewer than eight independent equations
+    // collinear triple gives rank(A) < 8
     return has_collinear_triple(source_points) ||
            has_collinear_triple(destination_points);
 }
@@ -210,25 +173,25 @@ HomographyResult estimate_homography(
     if(correspondences.size() < 4)
         return result;
 
-    // non-finite coordinates would corrupt the normalization and the DLT matrix
+    // finite coordinates only
     for(const auto& correspondence : correspondences) {
         if(!finite_point(correspondence.source) ||
            !finite_point(correspondence.destination))
             return result;
     }
-    // repeated refit points only repeat DLT rows and do not change the null vector
+    // repeated points only repeat rows of A
 
-    // zero mean distance produces an undefined normalization transform
+    // T and T' from these points, also on refit
     const auto source_normalization = normalize_points(correspondences, true);
     const auto destination_normalization = normalize_points(correspondences, false);
-    if(!std::isfinite(source_normalization.scale) ||
-       !std::isfinite(destination_normalization.scale) ||
-       source_normalization.scale <= kMinimumNormalizationScale ||
-       destination_normalization.scale <= kMinimumNormalizationScale)
+    // near-zero d gives no reliable s = sqrt(2) / d
+    if(!std::isfinite(source_normalization.mean_distance) ||
+       !std::isfinite(destination_normalization.mean_distance) ||
+       source_normalization.mean_distance <= kMinimumMeanDistance ||
+       destination_normalization.mean_distance <= kMinimumMeanDistance)
         return result;
 
-    // DLT matrix A in R^(2k x 9), two rows for each of the k correspondences
-    // built from the normalized points T p and T' p'
+    // A in R^(2k x 9) from normalized points T p and T' p'
     const auto rows = static_cast<Eigen::Index>(2 * correspondences.size());
     Eigen::MatrixXd dlt_matrix(rows, 9);
     Eigen::Index row = 0;
@@ -247,25 +210,17 @@ HomographyResult estimate_homography(
         dlt_matrix.row(row++) << 0.0, 0.0, 0.0, -x, -y, -1.0, v * x, v * y, v;
     }
 
-    // SVD A = U Sigma V^T computed directly on A, as in the tutorial
-    // full V is required: for k = 4, A is 8 x 9 and the null direction
-    // is the ninth column of V, which a thin V would not contain
+    // SVD A = U Sigma V^T directly on A
+    // full V: for k = 4, A is 8 x 9 and thin V lacks column 9
     const Eigen::JacobiSVD<Eigen::MatrixXd> svd(dlt_matrix, Eigen::ComputeFullV);
-    // h = argmin ||A h||_2 subject to ||h||_2 = 1 is the last column of V,
-    // the right singular vector of the smallest singular value sigma9
+    // h = argmin ||A h||_2, ||h||_2 = 1: last column of V (sigma9)
+    // rank(A) = 8 holds: samples pass the degeneracy checks,
+    // refit inliers contain the non-degenerate sample
     const Eigen::VectorXd h = svd.matrixV().col(8);
     if(!h.allFinite())
         return result;
 
-    // singular values are sorted in decreasing order: sigma1 >= sigma2 >= ...
-    // for k = 4 Eigen returns eight values, sigma9 = 0 is implicit
-    const Eigen::VectorXd& singular_values = svd.singularValues();
-    // sigma8 near zero means a second null direction and no unique h
-    if(singular_values(0) <= 0.0 ||
-       singular_values(7) / singular_values(0) < kMinimumRelativeSigma8)
-        return result;
-
-    // the nine elements of h reshaped row by row into the normalized Hn
+    // h reshaped row by row into Hn
     std::array<double, 9> normalized_matrix{};
     for(Eigen::Index index = 0; index < 9; ++index)
         normalized_matrix[static_cast<std::size_t>(index)] = h(index);
@@ -303,14 +258,13 @@ HomographyResult estimate_homography(
     for(const double value : matrix)
         matrix_norm += value * value;
     matrix_norm = std::sqrt(matrix_norm);
-    if(!std::isfinite(matrix_norm) || matrix_norm <= kMinimumNormalizationScale)
+    if(!std::isfinite(matrix_norm) || matrix_norm <= kMinimumMatrixNorm)
         return result;
     // homogeneous matrices are equivalent up to any non-zero scale
     for(double& value : matrix)
         value /= matrix_norm;
     // reject non-invertible estimates using a scale-invariant singular ratio
-    if(homography_singular_value_ratio(matrix) <
-       kMinimumHomographySingularValueRatio)
+    if(!is_invertible_homography(matrix))
         return result;
     result.valid = true;
     result.matrix = matrix;

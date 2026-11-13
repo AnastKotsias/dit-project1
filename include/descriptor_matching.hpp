@@ -20,7 +20,7 @@ struct DescriptorMatch {
 
 // two nearest candidate descriptors per query descriptor
 // strict Lowe condition d1 < rho * d2
-// evaluated on squared distances as D1 < rho^2 * D2
+// squared form D1 < rho^2 * D2
 // one 128-dimensional descriptor row per point
 // finite rho strictly between zero and one
 std::vector<DescriptorMatch> match_descriptors(

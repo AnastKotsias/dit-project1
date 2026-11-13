@@ -155,7 +155,7 @@ void testDescriptorMatching() {
     check(image_search::match_descriptors(query, candidate, 0.5).empty(),
           "descriptor matching accepted a candidate with one descriptor");
 
-    // d1 / d2 = 0.9 must fail rho = 0.85, although D1 / D2 = 0.81 < 0.85
+    // d1 / d2 = 0.9 fails rho = 0.85, though D1 / D2 = 0.81
     image_search::LocalFeatureSet single_query;
     single_query.points = {{{1.0, 2.0}}};
     single_query.descriptors = image_search::DescriptorMatrix(1, 128);
@@ -167,7 +167,7 @@ void testDescriptorMatching() {
     check(image_search::match_descriptors(single_query, ratio_candidate, 0.85).empty(),
           "descriptor matching compared squared distances with rho instead of rho squared");
 
-    // d1 / d2 = 0.8 must pass rho = 0.85
+    // d1 / d2 = 0.8 passes rho = 0.85
     ratio_candidate.descriptors.row(0)[0] = 8.0F;
     const auto ratio_matches =
         image_search::match_descriptors(single_query, ratio_candidate, 0.85);
@@ -234,13 +234,13 @@ void testHomographyEstimation() {
     check(image_search::is_degenerate_sample(collinear),
           "minimal sample check accepted collinear points");
 
-    // a repeated point in only one image
+    // repeated point in one image
     auto repeated_sample = correspondences;
     repeated_sample[3].destination = repeated_sample[0].destination;
     check(image_search::is_degenerate_sample(repeated_sample),
           "minimal sample check accepted a repeated point");
 
-    // three collinear points in only the destination image
+    // collinear triple in the destination only
     auto one_image_collinear = correspondences;
     one_image_collinear[2].destination = {9.0, -2.0};
     check(image_search::is_degenerate_sample(one_image_collinear),
@@ -260,16 +260,32 @@ void testHomographyEstimation() {
     check(image_search::estimate_homography(refit).valid,
           "homography refit rejected valid collinear inliers");
 
-    const std::vector<image_search::PointCorrespondence> collinear_refit = {
-        {{0.0, 0.0}, {4.0, -2.0}},
-        {{1.0, 1.0}, {5.0, -1.0}},
-        {{2.0, 2.0}, {6.0, 0.0}},
-        {{3.0, 3.0}, {7.0, 1.0}},
-        {{4.0, 4.0}, {8.0, 2.0}}};
-    check(!image_search::estimate_homography(collinear_refit).valid,
-          "homography accepted an all-collinear refit");
+    // rank-two map u = 0.1 x + 0.2 y, v = 0
+    const std::vector<image_search::PointCorrespondence> onto_line = {
+        {{0.0, 0.0}, {0.0, 0.0}},
+        {{10.0, 0.0}, {1.0, 0.0}},
+        {{0.0, 10.0}, {2.0, 0.0}},
+        {{10.0, 10.0}, {3.0, 0.0}}};
+    check(!image_search::estimate_homography(onto_line).valid,
+          "homography accepted a non-invertible estimate");
 
-    // repeated SIFT locations among the inliers must not reject the refit
+    // one destination point, d' = 0
+    auto one_destination = correspondences;
+    for(auto& correspondence : one_destination)
+        correspondence.destination = {7.0, 7.0};
+    check(!image_search::estimate_homography(one_destination).valid,
+          "homography accepted a zero normalization mean distance");
+
+    // all-collinear matches, every sample degenerate
+    std::vector<image_search::DescriptorMatch> collinear_matches;
+    for(std::size_t index = 0; index < 5; ++index) {
+        const double t = static_cast<double>(index);
+        collinear_matches.push_back({{t, t}, {t + 4.0, t - 2.0}, 0.0, index, index});
+    }
+    check(!image_search::estimate_homography_ransac(collinear_matches, {}).valid,
+          "RANSAC accepted all-collinear matches");
+
+    // refit accepts repeated inlier points
     auto duplicate = refit;
     duplicate.push_back(duplicate.front());
     const auto duplicate_result = image_search::estimate_homography(duplicate);
@@ -321,7 +337,7 @@ void testHomographyRansac() {
         [&] { image_search::estimate_homography_ransac(matches, {0.0}); },
         "RANSAC accepted an invalid reprojection threshold");
 
-    // SIFT orientations repeat one location, so an inlier can appear twice
+    // repeated inlier, as with multi-orientation SIFT keypoints
     auto repeated = matches;
     repeated.push_back(matches.front());
     const auto repeated_result =

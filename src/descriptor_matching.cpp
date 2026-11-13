@@ -72,9 +72,8 @@ std::vector<DescriptorMatch> match_descriptors(
         }
 
         // zero second distance makes the ratio undefined
-        // best and second_best are squared distances D1 = d1^2, D2 = d2^2
-        // d1 < rho d2 with d1, d2 >= 0 is equivalent to d1^2 < rho^2 d2^2
-        // so the squared test must use rho squared, not rho
+        // D1 = d1^2, D2 = d2^2
+        // d1 < rho d2  <=>  D1 < rho^2 D2
         if(std::isfinite(second_best) && second_best > 0.0 &&
            best < rho_squared * second_best) {
             matches.push_back({
