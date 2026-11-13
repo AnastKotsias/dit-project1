@@ -1,5 +1,8 @@
 #include "homography.hpp"
 
+#include <Eigen/Dense>
+#include <Eigen/SVD>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -17,8 +20,8 @@ constexpr double kMinimumNormalizationScale = 1e-12;
 constexpr double kMinimumPointSeparationSquared = 1e-10;
 // minimum normalized triangle area for non-collinearity
 constexpr double kMinimumCollinearity = 1e-4;
-// minimum relative second-smallest singular value for four points
-constexpr double kMinimumRelativeSigma8Squared = 1e-8;
+// minimum ratio sigma8 / sigma1 of the DLT matrix, same as the former 1e-8 on squares
+constexpr double kMinimumRelativeSigma8 = 1e-4;
 // minimum scale-invariant singular-value ratio for an estimated homography
 constexpr double kMinimumHomographySingularValueRatio = 1e-12;
 // Jacobi rotation convergence threshold
@@ -27,9 +30,6 @@ constexpr double kMinimumEigenvalueGap = 1e-12;
 bool finite_point(const Point2& point) {
     return std::isfinite(point[0]) && std::isfinite(point[1]);
 }
-
-using DltRow = std::array<double, 9>;
-using DltMatrix = std::vector<DltRow>;
 
 struct Normalization {
     Point2 center{};
@@ -112,89 +112,6 @@ bool has_collinear_triple(const std::vector<Point2>& points) {
         }
     }
     return false;
-}
-
-struct SvdResult {
-    std::array<double, 9> right_singular_vector{};
-    std::array<double, 9> singular_values_squared{};
-};
-
-SvdResult compute_svd(const DltMatrix& matrix) {
-    DltMatrix transformed = matrix;
-    std::array<std::array<double, 9>, 9> right_vectors{};
-    for(std::size_t index = 0; index < 9; ++index) {
-        right_vectors[index][index] = 1.0;
-    }
-
-    // one sided Jacobi SVD orthogonalizes the columns of A
-    for(std::size_t iteration = 0; iteration < 9 * 9 * 20; ++iteration) {
-        double largest_correlation = 0.0;
-        for(std::size_t first = 0; first < 9; ++first) {
-            for(std::size_t second = first + 1; second < 9; ++second) {
-                double first_norm = 0.0;
-                double second_norm = 0.0;
-                double correlation = 0.0;
-                for(const auto& row : transformed) {
-                    first_norm += row[first] * row[first];
-                    second_norm += row[second] * row[second];
-                    correlation += row[first] * row[second];
-                }
-                // zero columns cannot contribute a Jacobi rotation
-                if(first_norm == 0.0 || second_norm == 0.0)
-                    continue;
-                largest_correlation = std::max(
-                    largest_correlation,
-                    std::abs(correlation) /
-                        std::sqrt(first_norm * second_norm));
-                if(std::abs(correlation) <= kMinimumEigenvalueGap)
-                    continue;
-
-                // rotation angle that removes the column correlation
-                const double angle = 0.5 * std::atan2(
-                    2.0 * correlation, second_norm - first_norm);
-                const double cosine = std::cos(angle);
-                const double sine = std::sin(angle);
-                for(auto& row : transformed) {
-                    const double first_value = row[first];
-                    const double second_value = row[second];
-                    row[first] = cosine * first_value - sine * second_value;
-                    row[second] = sine * first_value + cosine * second_value;
-                }
-                for(std::size_t index = 0; index < 9; ++index) {
-                    const double first_value = right_vectors[index][first];
-                    const double second_value = right_vectors[index][second];
-                    right_vectors[index][first] =
-                        cosine * first_value - sine * second_value;
-                    right_vectors[index][second] =
-                        sine * first_value + cosine * second_value;
-                }
-            }
-        }
-        if(largest_correlation <= kMinimumEigenvalueGap)
-            break;
-    }
-
-    // column norms are squared singular values after orthogonalization
-    std::array<double, 9> singular_values_squared{};
-    for(std::size_t index = 0; index < 9; ++index) {
-        for(const auto& row : transformed)
-            singular_values_squared[index] += row[index] * row[index];
-    }
-
-    // smallest column norm identifies the right singular vector for sigma nine
-    std::size_t smallest = 0;
-    double smallest_norm = std::numeric_limits<double>::infinity();
-    for(std::size_t index = 0; index < 9; ++index) {
-        if(singular_values_squared[index] < smallest_norm) {
-            smallest_norm = singular_values_squared[index];
-            smallest = index;
-        }
-    }
-    SvdResult result;
-    for(std::size_t index = 0; index < 9; ++index)
-        result.right_singular_vector[index] = right_vectors[index][smallest];
-    result.singular_values_squared = singular_values_squared;
-    return result;
 }
 
 double homography_singular_value_ratio(const Matrix3& matrix) {
@@ -310,43 +227,48 @@ HomographyResult estimate_homography(
        destination_normalization.scale <= kMinimumNormalizationScale)
         return result;
 
-    // explicit DLT matrix with two rows for each correspondence
-    DltMatrix dlt_matrix;
-    dlt_matrix.reserve(2 * correspondences.size());
+    // DLT matrix A in R^(2k x 9), two rows for each of the k correspondences
+    // built from the normalized points T p and T' p'
+    const auto rows = static_cast<Eigen::Index>(2 * correspondences.size());
+    Eigen::MatrixXd dlt_matrix(rows, 9);
+    Eigen::Index row = 0;
     for(const auto& correspondence : correspondences) {
         const auto source = normalized_point(correspondence.source,
                                               source_normalization);
         const auto destination = normalized_point(correspondence.destination,
                                                    destination_normalization);
-        // h11 x plus h12 y plus h13 minus u times h31 x plus h32 y plus h33
-        const DltRow first = {
-            -source[0], -source[1], -1.0, 0.0, 0.0, 0.0,
-            destination[0] * source[0], destination[0] * source[1],
-            destination[0]};
-        // h21 x plus h22 y plus h23 minus v times h31 x plus h32 y plus h33
-        const DltRow second = {
-            0.0, 0.0, 0.0, -source[0], -source[1], -1.0,
-            destination[1] * source[0], destination[1] * source[1],
-            destination[1]};
-        dlt_matrix.push_back(first);
-        dlt_matrix.push_back(second);
+        const double x = source[0];
+        const double y = source[1];
+        const double u = destination[0];
+        const double v = destination[1];
+        // u (h31 x + h32 y + h33) - (h11 x + h12 y + h13) = 0
+        dlt_matrix.row(row++) << -x, -y, -1.0, 0.0, 0.0, 0.0, u * x, u * y, u;
+        // v (h31 x + h32 y + h33) - (h21 x + h22 y + h23) = 0
+        dlt_matrix.row(row++) << 0.0, 0.0, 0.0, -x, -y, -1.0, v * x, v * y, v;
     }
 
-    // SVD A equals U Sigma V transpose
-    const auto svd = compute_svd(dlt_matrix);
-    const auto normalized_matrix = svd.right_singular_vector;
-    auto singular_values_squared = svd.singular_values_squared;
-    std::sort(singular_values_squared.begin(), singular_values_squared.end());
-    if(singular_values_squared[8] <= 0.0 ||
-       singular_values_squared[1] /
-           singular_values_squared[8] < kMinimumRelativeSigma8Squared)
+    // SVD A = U Sigma V^T computed directly on A, as in the tutorial
+    // full V is required: for k = 4, A is 8 x 9 and the null direction
+    // is the ninth column of V, which a thin V would not contain
+    const Eigen::JacobiSVD<Eigen::MatrixXd> svd(dlt_matrix, Eigen::ComputeFullV);
+    // h = argmin ||A h||_2 subject to ||h||_2 = 1 is the last column of V,
+    // the right singular vector of the smallest singular value sigma9
+    const Eigen::VectorXd h = svd.matrixV().col(8);
+    if(!h.allFinite())
         return result;
-    double norm = 0.0;
-    for(const double value : normalized_matrix)
-        norm += value * value;
-    norm = std::sqrt(norm);
-    if(!std::isfinite(norm) || norm <= kMinimumNormalizationScale)
+
+    // singular values are sorted in decreasing order: sigma1 >= sigma2 >= ...
+    // for k = 4 Eigen returns eight values, sigma9 = 0 is implicit
+    const Eigen::VectorXd& singular_values = svd.singularValues();
+    // sigma8 near zero means a second null direction and no unique h
+    if(singular_values(0) <= 0.0 ||
+       singular_values(7) / singular_values(0) < kMinimumRelativeSigma8)
         return result;
+
+    // the nine elements of h reshaped row by row into the normalized Hn
+    std::array<double, 9> normalized_matrix{};
+    for(Eigen::Index index = 0; index < 9; ++index)
+        normalized_matrix[static_cast<std::size_t>(index)] = h(index);
 
     // H equals inverse destination transform times normalized H times source transform
     const double source_scale = source_normalization.scale;

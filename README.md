@@ -23,6 +23,7 @@ The data are the full-size **HPatches** sequences (116 sequences of six images;
 
 - Linux, a C++20 compiler (GCC or Clang), CMake ≥ 3.20, `make`
 - OpenCV ≥ 4.4 (SIFT is part of `features2d`); OpenMP is optional
+- Eigen ≥ 3.3, header-only (`sudo apt install libeigen3-dev` on Ubuntu/Debian)
 
 ```bash
 make                  # Release build in build/, creates the ./search link
@@ -42,6 +43,12 @@ components without requiring the image data sets.
 [src/image_features.cpp](src/image_features.cpp)); the descriptors are copied out of the
 `cv::Mat` immediately. Descriptor storage, sampling, k-means, nearest-center
 assignment and every distance computation are implemented in this project.
+
+**Eigen use.** As the Assignment 2 description allows, Eigen is used only for
+the SVD of the DLT matrix (`Eigen::JacobiSVD` with `ComputeFullV`, in
+`estimate_homography`, [src/homography.cpp](src/homography.cpp)). Building the
+DLT matrix, point normalization, denormalization, the degeneracy and numerical
+checks, descriptor matching and RANSAC are implemented in this project.
 
 **Parallelism.** OpenMP parallelises only the image preprocessing, one image per
 iteration: SIFT extraction of the training images and of the HPatches/MIRFlickr/query

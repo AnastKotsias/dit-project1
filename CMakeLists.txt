@@ -15,6 +15,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Eigen only computes the SVD of the DLT matrix; DLT, matching and RANSAC are project code
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+
 if(BUILD_SEARCH_APP)
     # OpenCV only reads images (imgcodecs) and computes SIFT descriptors (features2d)
     find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
@@ -41,7 +44,7 @@ if(BUILD_SEARCH_APP)
     )
 
     target_include_directories(search PRIVATE include)
-    target_link_libraries(search PRIVATE ${OpenCV_LIBS})
+    target_link_libraries(search PRIVATE ${OpenCV_LIBS} Eigen3::Eigen)
 
     # optional: only parallelizes image preprocessing, results are identical without it
     find_package(OpenMP)
@@ -68,6 +71,6 @@ if(BUILD_TESTING)
     )
 
     target_include_directories(image_search_tests PRIVATE include src/search)
-    target_link_libraries(image_search_tests PRIVATE ${OpenCV_LIBS})
+    target_link_libraries(image_search_tests PRIVATE ${OpenCV_LIBS} Eigen3::Eigen)
     add_test(NAME image_search_unit_tests COMMAND image_search_tests)
 endif()
