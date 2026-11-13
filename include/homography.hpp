@@ -24,7 +24,14 @@ struct HomographyResult {
     std::optional<double> median_error;
 };
 
+// minimal RANSAC sample check, exactly four correspondences
+// true for non-finite or repeated points, or a nearly collinear triple,
+// in either image
+bool is_degenerate_sample(
+    const std::vector<PointCorrespondence>& sample);
+
 // normalized DLT result for a set of point correspondences
+// sample degeneracy is checked separately, so refits may repeat points
 HomographyResult estimate_homography(
     const std::vector<PointCorrespondence>& correspondences);
 

@@ -124,8 +124,11 @@ HomographyResult estimate_homography_ransac(
         for(const std::size_t index : sample_indices)
             sample.push_back({matches[index].query_point,
                               matches[index].candidate_point});
+        // repeated or collinear samples are discarded and still count as a trial
+        if(is_degenerate_sample(sample))
+            continue;
         const auto hypothesis = estimate_homography(sample);
-        // duplicate, collinear, or numerically invalid samples are discarded
+        // numerically invalid hypotheses are discarded
         if(!hypothesis.valid)
             continue;
 
@@ -168,6 +171,8 @@ HomographyResult estimate_homography_ransac(
         return failure;
 
     // refit only from the best hypothesis's inliers
+    // SIFT can repeat a keypoint location and Lowe matching is many-to-one,
+    // so the inliers may repeat points; no sample degeneracy check here
     std::vector<PointCorrespondence> refit_correspondences;
     refit_correspondences.reserve(best.inlier_indices.size());
     for(const std::size_t index : best.inlier_indices)

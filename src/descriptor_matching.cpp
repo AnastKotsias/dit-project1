@@ -40,6 +40,9 @@ std::vector<DescriptorMatch> match_descriptors(
     validate_features(query, "query");
     validate_features(candidate, "candidate");
 
+    // Lowe threshold for squared distances
+    const double rho_squared = rho * rho;
+
     std::vector<DescriptorMatch> matches;
     // fewer than two candidates gives an empty result
     if(candidate.descriptors.rows < 2)
@@ -69,8 +72,11 @@ std::vector<DescriptorMatch> match_descriptors(
         }
 
         // zero second distance makes the ratio undefined
+        // best and second_best are squared distances D1 = d1^2, D2 = d2^2
+        // d1 < rho d2 with d1, d2 >= 0 is equivalent to d1^2 < rho^2 d2^2
+        // so the squared test must use rho squared, not rho
         if(std::isfinite(second_best) && second_best > 0.0 &&
-           best < rho * second_best) {
+           best < rho_squared * second_best) {
             matches.push_back({
                 query.points[query_index],
                 candidate.points[best_index],

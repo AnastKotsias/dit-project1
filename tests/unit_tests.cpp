@@ -154,6 +154,26 @@ void testDescriptorMatching() {
     candidate.descriptors = image_search::DescriptorMatrix(1, 128);
     check(image_search::match_descriptors(query, candidate, 0.5).empty(),
           "descriptor matching accepted a candidate with one descriptor");
+
+    // d1 / d2 = 0.9 must fail rho = 0.85, although D1 / D2 = 0.81 < 0.85
+    image_search::LocalFeatureSet single_query;
+    single_query.points = {{{1.0, 2.0}}};
+    single_query.descriptors = image_search::DescriptorMatrix(1, 128);
+    image_search::LocalFeatureSet ratio_candidate;
+    ratio_candidate.points = {{{5.0, 6.0}, {7.0, 8.0}}};
+    ratio_candidate.descriptors = image_search::DescriptorMatrix(2, 128);
+    ratio_candidate.descriptors.row(0)[0] = 9.0F;
+    ratio_candidate.descriptors.row(1)[0] = 10.0F;
+    check(image_search::match_descriptors(single_query, ratio_candidate, 0.85).empty(),
+          "descriptor matching compared squared distances with rho instead of rho squared");
+
+    // d1 / d2 = 0.8 must pass rho = 0.85
+    ratio_candidate.descriptors.row(0)[0] = 8.0F;
+    const auto ratio_matches =
+        image_search::match_descriptors(single_query, ratio_candidate, 0.85);
+    check(ratio_matches.size() == 1 &&
+              std::abs(ratio_matches.front().descriptor_distance - 8.0) < 1e-12,
+          "descriptor matching rejected a match below the Lowe ratio");
 }
 
 // Test homography projection and invalid denominator handling.
@@ -203,13 +223,33 @@ void testHomographyEstimation() {
               "normalized DLT estimated the wrong homography");
     }
 
+    check(!image_search::is_degenerate_sample(correspondences),
+          "a non-degenerate minimal sample was rejected");
+
     const std::vector<image_search::PointCorrespondence> collinear = {
         {{0.0, 0.0}, {0.0, 0.0}},
         {{1.0, 1.0}, {1.0, 1.0}},
         {{2.0, 2.0}, {2.0, 2.0}},
         {{3.0, 3.0}, {3.0, 3.0}}};
-    check(!image_search::estimate_homography(collinear).valid,
-          "normalized DLT accepted collinear points");
+    check(image_search::is_degenerate_sample(collinear),
+          "minimal sample check accepted collinear points");
+
+    // a repeated point in only one image
+    auto repeated_sample = correspondences;
+    repeated_sample[3].destination = repeated_sample[0].destination;
+    check(image_search::is_degenerate_sample(repeated_sample),
+          "minimal sample check accepted a repeated point");
+
+    // three collinear points in only the destination image
+    auto one_image_collinear = correspondences;
+    one_image_collinear[2].destination = {9.0, -2.0};
+    check(image_search::is_degenerate_sample(one_image_collinear),
+          "minimal sample check accepted a collinear triple in one image");
+
+    auto five_points = correspondences;
+    five_points.push_back({{5.0, 3.0}, {9.0, 1.0}});
+    checkThrows([&] { image_search::is_degenerate_sample(five_points); },
+                "minimal sample check accepted more than four correspondences");
 
     const std::vector<image_search::PointCorrespondence> refit = {
         {{0.0, 0.0}, {4.0, -2.0}},
@@ -229,18 +269,26 @@ void testHomographyEstimation() {
     check(!image_search::estimate_homography(collinear_refit).valid,
           "homography accepted an all-collinear refit");
 
+    // repeated SIFT locations among the inliers must not reject the refit
     auto duplicate = refit;
-    duplicate.back().source = duplicate.front().source;
-    check(!image_search::estimate_homography(duplicate).valid,
-          "homography accepted duplicate refit points");
+    duplicate.push_back(duplicate.front());
+    const auto duplicate_result = image_search::estimate_homography(duplicate);
+    check(duplicate_result.valid,
+          "homography refit rejected repeated inlier points");
+    const auto duplicate_projected = image_search::project_point(
+        duplicate_result.matrix, {1.0, 1.0});
+    check(duplicate_projected.has_value() &&
+              std::abs((*duplicate_projected)[0] - 5.0) < 1e-6 &&
+              std::abs((*duplicate_projected)[1] + 1.0) < 1e-6,
+          "homography refit with repeated points estimated the wrong homography");
 
     const std::vector<image_search::PointCorrespondence> nearly_collinear = {
         {{0.0, 0.0}, {0.0, 0.0}},
         {{1000000.0, 0.0}, {1000000.0, 0.0}},
         {{2000000.0, 1.0}, {2000000.0, 1.0}},
         {{0.0, 1000000.0}, {0.0, 1000000.0}}};
-    check(!image_search::estimate_homography(nearly_collinear).valid,
-          "homography accepted a scale-normalized near-collinear sample");
+    check(image_search::is_degenerate_sample(nearly_collinear),
+          "minimal sample check accepted a scale-normalized near-collinear sample");
 }
 
 // Test deterministic RANSAC rejection and refitting with synthetic matches
@@ -272,6 +320,14 @@ void testHomographyRansac() {
     checkThrows(
         [&] { image_search::estimate_homography_ransac(matches, {0.0}); },
         "RANSAC accepted an invalid reprojection threshold");
+
+    // SIFT orientations repeat one location, so an inlier can appear twice
+    auto repeated = matches;
+    repeated.push_back(matches.front());
+    const auto repeated_result =
+        image_search::estimate_homography_ransac(repeated, config);
+    check(repeated_result.valid && repeated_result.inlier_indices.size() == 6,
+          "RANSAC failed when an inlier location was repeated");
 }
 
 }

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 namespace image_search {
 namespace {
@@ -257,6 +258,34 @@ double homography_singular_value_ratio(const Matrix3& matrix) {
 
 }  // namespace
 
+bool is_degenerate_sample(const std::vector<PointCorrespondence>& sample) {
+    // the checks are defined for the four-point minimal sample only
+    if(sample.size() != 4)
+        throw std::invalid_argument("a minimal homography sample has four correspondences");
+
+    // split the sample into its query-image and candidate-image points
+    std::vector<Point2> source_points;
+    std::vector<Point2> destination_points;
+    source_points.reserve(sample.size());
+    destination_points.reserve(sample.size());
+    for(const auto& correspondence : sample) {
+        // NaN would pass every distance comparison below
+        if(!finite_point(correspondence.source) ||
+           !finite_point(correspondence.destination))
+            return true;
+        source_points.push_back(correspondence.source);
+        destination_points.push_back(correspondence.destination);
+    }
+
+    // four distinct points are needed in each image
+    if(has_duplicate_points(source_points) ||
+       has_duplicate_points(destination_points))
+        return true;
+    // three collinear points leave fewer than eight independent equations
+    return has_collinear_triple(source_points) ||
+           has_collinear_triple(destination_points);
+}
+
 HomographyResult estimate_homography(
     const std::vector<PointCorrespondence>& correspondences) {
     HomographyResult result;
@@ -264,25 +293,13 @@ HomographyResult estimate_homography(
     if(correspondences.size() < 4)
         return result;
 
-    // collect and validate both point sets
-    std::vector<Point2> source_points;
-    std::vector<Point2> destination_points;
-    source_points.reserve(correspondences.size());
-    destination_points.reserve(correspondences.size());
+    // non-finite coordinates would corrupt the normalization and the DLT matrix
     for(const auto& correspondence : correspondences) {
         if(!finite_point(correspondence.source) ||
            !finite_point(correspondence.destination))
             return result;
-        source_points.push_back(correspondence.source);
-        destination_points.push_back(correspondence.destination);
     }
-    if(has_duplicate_points(source_points) ||
-       has_duplicate_points(destination_points))
-        return result;
-    if(correspondences.size() == 4 &&
-       (has_collinear_triple(source_points) ||
-        has_collinear_triple(destination_points)))
-        return result;
+    // repeated refit points only repeat DLT rows and do not change the null vector
 
     // zero mean distance produces an undefined normalization transform
     const auto source_normalization = normalize_points(correspondences, true);
