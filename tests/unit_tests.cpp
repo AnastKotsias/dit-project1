@@ -6,6 +6,9 @@
 #include "kmeans.hpp"
 #include "search.hpp"
 
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -142,7 +145,7 @@ void testDatasetPaths() {
     check(paths.back() == std::filesystem::path("dataset") / "i_bike" / "6.ppm", "last training path is incorrect");
 }
 
-// Test the local-feature extraction status for an unreadable image.
+// Test the local-feature extraction status and the stored image size.
 void testLocalFeatures() {
     const auto result = image_search::extract_sift_features(
         std::filesystem::path("missing-image-for-unit-test.pgm"));
@@ -151,6 +154,43 @@ void testLocalFeatures() {
           "local feature extraction did not report an unreadable image");
     check(result.points.empty() && result.descriptors.empty(),
           "unreadable image returned local features");
+    check(result.width == 0 && result.height == 0,
+          "unreadable image returned a size");
+
+    // blank image: size kept without descriptors
+    const auto blank_path =
+        std::filesystem::temp_directory_path() / "image_search_blank_test.pgm";
+    check(cv::imwrite(blank_path.string(), cv::Mat(48, 64, CV_8UC1, cv::Scalar(128))),
+          "could not write the blank test image");
+    const auto blank = image_search::extract_sift_features(blank_path);
+    std::filesystem::remove(blank_path);
+    check(blank.status == image_search::SiftExtractionStatus::NoDescriptors &&
+              blank.width == 64 && blank.height == 48,
+          "image without descriptors lost its size");
+
+    // checkerboard: keypoints inside a 160 x 120 image
+    cv::Mat board(120, 160, CV_8UC1);
+    for(int row = 0; row < board.rows; ++row) {
+        for(int column = 0; column < board.cols; ++column)
+            board.at<unsigned char>(row, column) =
+                ((row / 20 + column / 20) % 2 == 0) ? 30 : 220;
+    }
+    const auto board_path =
+        std::filesystem::temp_directory_path() / "image_search_board_test.pgm";
+    check(cv::imwrite(board_path.string(), board),
+          "could not write the checkerboard test image");
+    const auto features = image_search::extract_sift_features(board_path);
+    std::filesystem::remove(board_path);
+    check(features.status == image_search::SiftExtractionStatus::Success &&
+              features.width == 160 && features.height == 120,
+          "local feature extraction stored the wrong image size");
+    check(features.points.size() == features.descriptors.rows,
+          "keypoints and descriptors are misaligned");
+    for(const auto& point : features.points) {
+        check(point[0] >= 0.0 && point[0] < 160.0 &&
+                  point[1] >= 0.0 && point[1] < 120.0,
+              "keypoint lies outside the stored image size");
+    }
 }
 
 // Test strict Lowe-ratio matching, tie handling and insufficient candidates.

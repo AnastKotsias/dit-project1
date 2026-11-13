@@ -13,6 +13,9 @@ LocalFeatureSet extract_sift_features(const std::filesystem::path& image_path) {
     cv::Mat image = cv::imread(image_path.string(), cv::IMREAD_GRAYSCALE);
     if(image.empty())
         return {{}, {}, SiftExtractionStatus::ImageUnreadable};
+    // image size, needed for the corners a_i of the corner error
+    const auto width = static_cast<std::size_t>(image.cols);
+    const auto height = static_cast<std::size_t>(image.rows);
 
     const auto sift = cv::SIFT::create();
     std::vector<cv::KeyPoint> keypoints;
@@ -20,7 +23,7 @@ LocalFeatureSet extract_sift_features(const std::filesystem::path& image_path) {
     sift->detectAndCompute(image, cv::noArray(), keypoints, descriptors);
 
     if(descriptors.empty())
-        return {{}, {}, SiftExtractionStatus::NoDescriptors};
+        return {{}, {}, SiftExtractionStatus::NoDescriptors, width, height};
     if(descriptors.type() != CV_32F)
         throw std::runtime_error("SIFT returned descriptors that are not 32-bit floats");
     if(descriptors.rows != static_cast<int>(keypoints.size()) ||
@@ -42,6 +45,8 @@ LocalFeatureSet extract_sift_features(const std::filesystem::path& image_path) {
                   result.descriptors.row(row));
     }
     result.status = SiftExtractionStatus::Success;
+    result.width = width;
+    result.height = height;
     return result;
 }
 
