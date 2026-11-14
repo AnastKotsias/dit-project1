@@ -75,7 +75,8 @@ std::size_t adaptive_limit(std::size_t current_limit,
     const auto required = static_cast<std::size_t>(
         std::min(required_trials,
                  static_cast<double>(std::numeric_limits<std::size_t>::max())));
-    return std::min(current_limit, std::max(required, completed_trials));
+    // T_limit <- min(T_limit, T_new)
+    return std::min(current_limit, required);
 }
 
 }  // namespace

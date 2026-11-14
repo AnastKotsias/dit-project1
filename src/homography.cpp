@@ -14,8 +14,6 @@ namespace {
 
 // minimum valid homogeneous denominator
 constexpr double kMinimumProjectionDenominator = 1e-12;
-// minimum Frobenius norm of H
-constexpr double kMinimumMatrixNorm = 1e-12;
 // minimum mean centroid distance in pixels, above rounding noise
 constexpr double kMinimumMeanDistance = 1e-8;
 // minimum accepted squared distance between distinct points
@@ -69,6 +67,27 @@ Point2 normalized_point(const Point2& point, const Normalization& normalization)
             (point[1] - normalization.center[1]) * normalization.scale};
 }
 
+// T = [s 0 -s x; 0 s -s y; 0 0 1], (x, y) the centroid
+Eigen::Matrix3d normalization_matrix(const Normalization& normalization) {
+    const double s = normalization.scale;
+    Eigen::Matrix3d transform;
+    transform << s, 0.0, -s * normalization.center[0],
+                 0.0, s, -s * normalization.center[1],
+                 0.0, 0.0, 1.0;
+    return transform;
+}
+
+// T^-1 = [1/s 0 x; 0 1/s y; 0 0 1]
+// undo the scaling, then move the centroid back
+Eigen::Matrix3d inverse_normalization_matrix(const Normalization& normalization) {
+    const double inverse_scale = 1.0 / normalization.scale;
+    Eigen::Matrix3d transform;
+    transform << inverse_scale, 0.0, normalization.center[0],
+                 0.0, inverse_scale, normalization.center[1],
+                 0.0, 0.0, 1.0;
+    return transform;
+}
+
 double triangle_cross_product(const Point2& first, const Point2& second,
                               const Point2& third) {
     return std::abs((second[0] - first[0]) * (third[1] - first[1]) -
@@ -115,13 +134,9 @@ bool has_collinear_triple(const std::vector<Point2>& points) {
     return false;
 }
 
-bool is_invertible_homography(const Matrix3& matrix) {
+bool is_invertible_homography(const Eigen::Matrix3d& homography) {
     // singular values of H itself, sigma1 >= sigma2 >= sigma3 >= 0
     // H^T H would square the condition number
-    Eigen::Matrix3d homography;
-    homography << matrix[0], matrix[1], matrix[2],
-                  matrix[3], matrix[4], matrix[5],
-                  matrix[6], matrix[7], matrix[8];
     // singular values only, no U or V
     const Eigen::JacobiSVD<Eigen::Matrix3d> svd(homography);
     const Eigen::Vector3d& singular_values = svd.singularValues();
@@ -217,57 +232,33 @@ HomographyResult estimate_homography(
     // rank(A) = 8 holds: samples pass the degeneracy checks,
     // refit inliers contain the non-degenerate sample
     const Eigen::VectorXd h = svd.matrixV().col(8);
-    if(!h.allFinite())
-        return result;
 
     // h reshaped row by row into Hn
-    std::array<double, 9> normalized_matrix{};
-    for(Eigen::Index index = 0; index < 9; ++index)
-        normalized_matrix[static_cast<std::size_t>(index)] = h(index);
+    Eigen::Matrix3d normalized_homography;
+    normalized_homography << h(0), h(1), h(2),
+                             h(3), h(4), h(5),
+                             h(6), h(7), h(8);
 
-    // H equals inverse destination transform times normalized H times source transform
-    const double source_scale = source_normalization.scale;
-    const double destination_scale = destination_normalization.scale;
-    const double tx = source_normalization.center[0];
-    const double ty = source_normalization.center[1];
-    const double ux = destination_normalization.center[0];
-    const double uy = destination_normalization.center[1];
-    Matrix3 matrix = {
-        normalized_matrix[0] * source_scale / destination_scale +
-            ux * normalized_matrix[6] * source_scale,
-        normalized_matrix[1] * source_scale / destination_scale +
-            ux * normalized_matrix[7] * source_scale,
-        (normalized_matrix[2] - normalized_matrix[0] * source_scale * tx -
-         normalized_matrix[1] * source_scale * ty) / destination_scale +
-            ux * (normalized_matrix[8] - normalized_matrix[6] * source_scale * tx -
-                  normalized_matrix[7] * source_scale * ty),
-        normalized_matrix[3] * source_scale / destination_scale +
-            uy * normalized_matrix[6] * source_scale,
-        normalized_matrix[4] * source_scale / destination_scale +
-            uy * normalized_matrix[7] * source_scale,
-        (normalized_matrix[5] - normalized_matrix[3] * source_scale * tx -
-         normalized_matrix[4] * source_scale * ty) / destination_scale +
-            uy * (normalized_matrix[8] - normalized_matrix[6] * source_scale * tx -
-                  normalized_matrix[7] * source_scale * ty),
-        normalized_matrix[6] * source_scale,
-        normalized_matrix[7] * source_scale,
-        normalized_matrix[8] - normalized_matrix[6] * source_scale * tx -
-            normalized_matrix[7] * source_scale * ty};
+    // H = T'^-1 Hn T, back to pixel coordinates
+    const Eigen::Matrix3d homography =
+        inverse_normalization_matrix(destination_normalization) *
+        normalized_homography *
+        normalization_matrix(source_normalization);
 
-    double matrix_norm = 0.0;
-    for(const double value : matrix)
-        matrix_norm += value * value;
-    matrix_norm = std::sqrt(matrix_norm);
-    if(!std::isfinite(matrix_norm) || matrix_norm <= kMinimumMatrixNorm)
+    // every element of H finite, no NaN or Inf
+    if(!homography.allFinite())
         return result;
-    // homogeneous matrices are equivalent up to any non-zero scale
-    for(double& value : matrix)
-        value /= matrix_norm;
-    // reject non-invertible estimates using a scale-invariant singular ratio
-    if(!is_invertible_homography(matrix))
+    // σ3 / σ1 > epsilon_rank
+    if(!is_invertible_homography(homography))
         return result;
+
+    // row-major storage, as h
+    for(Eigen::Index row = 0; row < 3; ++row) {
+        for(Eigen::Index column = 0; column < 3; ++column)
+            result.matrix[static_cast<std::size_t>(3 * row + column)] =
+                homography(row, column);
+    }
     result.valid = true;
-    result.matrix = matrix;
     return result;
 }
 
