@@ -1,13 +1,16 @@
 #ifndef PIPELINE_HPP
 #define PIPELINE_HPP
 
+#include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
 
 #include "dataset.hpp"
 #include "image_features.hpp"
+#include "local_features.hpp"
 #include "matrix.hpp"
 
 namespace image_search {
@@ -78,6 +81,30 @@ MultiBowVectorResult extract_bow_vector_sets(
     const std::vector<ImageRecord>& records,
     const std::vector<DescriptorMatrix>& vocabularies,
     std::size_t successful_limit = 0);
+
+// load_features(image_id) of geometric verification: SIFT keypoints and descriptors of each
+// image, extracted once and kept for later queries, so extraction stays outside the timers
+class LocalFeatureStore {
+public:
+    // one image path per index, e.g. in the database order of the BoVW vectors
+    explicit LocalFeatureStore(std::vector<std::filesystem::path> image_paths);
+
+    // extracts the listed images that are not stored yet, in parallel like the BoVW vectors
+    // throws if an index is out of range or an image has no descriptors, storing none of them
+    void load(const std::vector<std::size_t>& indices);
+
+    // stored features of an image, throws if it was not loaded first
+    const LocalFeatureSet& features(std::size_t index) const;
+
+    // number of images with stored features
+    std::size_t loaded_count() const;
+
+private:
+    std::vector<std::filesystem::path> paths;
+    // empty until the image is loaded
+    std::vector<std::optional<LocalFeatureSet>> stored;
+    std::size_t loaded = 0;
+};
 
 }  // namespace image_search
 

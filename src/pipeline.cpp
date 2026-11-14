@@ -171,4 +171,50 @@ MultiBowVectorResult extract_bow_vector_sets(
     return result;
 }
 
+LocalFeatureStore::LocalFeatureStore(std::vector<std::filesystem::path> image_paths)
+    : paths(std::move(image_paths)), stored(paths.size()) {}
+
+void LocalFeatureStore::load(const std::vector<std::size_t>& indices) {
+    // images not stored yet, each listed once
+    std::vector<std::size_t> missing;
+    std::vector<bool> pending(paths.size(), false);
+    for(const std::size_t index : indices) {
+        if(index >= paths.size())
+            throw std::out_of_range("local feature index is out of range");
+        if(!stored[index].has_value() && !pending[index]) {
+            pending[index] = true;
+            missing.push_back(index);
+        }
+    }
+
+    // SIFT extraction is preprocessing, so it may run in parallel
+    std::vector<LocalFeatureSet> extracted(missing.size());
+    parallel_for_images(0, missing.size(), [&](std::size_t i) {
+        extracted[i] = extract_sift_features(paths[missing[i]]);
+    });
+
+    // every image had descriptors when its BoVW vector was built
+    // checked before storing, so a failed load stores nothing
+    for(std::size_t i = 0; i < missing.size(); ++i) {
+        if(extracted[i].status != SiftExtractionStatus::Success)
+            throw std::runtime_error(
+                "failed to extract local features from " + paths[missing[i]].string() +
+                " (" + sift_extraction_status_name(extracted[i].status) + ")");
+    }
+    for(std::size_t i = 0; i < missing.size(); ++i)
+        stored[missing[i]] = std::move(extracted[i]);
+    loaded += missing.size();
+}
+
+const LocalFeatureSet& LocalFeatureStore::features(std::size_t index) const {
+    // no extraction here, verification only reads stored features
+    if(index >= paths.size() || !stored[index].has_value())
+        throw std::logic_error("local features requested before they were loaded");
+    return *stored[index];
+}
+
+std::size_t LocalFeatureStore::loaded_count() const {
+    return loaded;
+}
+
 }  // namespace image_search

@@ -65,6 +65,8 @@ if(BUILD_TESTING)
         src/homography.cpp
         src/geometric_verification.cpp
         src/kmeans.cpp
+        src/vocabulary.cpp
+        src/pipeline.cpp
         src/search/common.cpp
         src/search/exact.cpp
         src/search/lsh.cpp

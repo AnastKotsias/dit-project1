@@ -3,6 +3,7 @@
 #include "geometric_verification.hpp"
 #include "homography.hpp"
 #include "local_features.hpp"
+#include "pipeline.hpp"
 #include "kmeans.hpp"
 #include "search.hpp"
 
@@ -250,6 +251,57 @@ void testLocalFeatures() {
                   point[1] >= 0.0 && point[1] < 120.0,
               "keypoint lies outside the stored image size");
     }
+}
+
+// Test that local features are extracted once and only read afterwards
+void testLocalFeatureStore() {
+    // two checkerboards of different square size and a blank image
+    const auto directory = std::filesystem::temp_directory_path();
+    std::vector<std::filesystem::path> paths;
+    for(const int square : {20, 16}) {
+        cv::Mat board(120, 160, CV_8UC1);
+        for(int row = 0; row < board.rows; ++row) {
+            for(int column = 0; column < board.cols; ++column)
+                board.at<unsigned char>(row, column) =
+                    ((row / square + column / square) % 2 == 0) ? 30 : 220;
+        }
+        paths.push_back(directory /
+                        ("image_search_store_" + std::to_string(square) + ".pgm"));
+        check(cv::imwrite(paths.back().string(), board),
+              "could not write the feature store test image");
+    }
+    paths.push_back(directory / "image_search_store_blank.pgm");
+    check(cv::imwrite(paths.back().string(), cv::Mat(48, 64, CV_8UC1, cv::Scalar(128))),
+          "could not write the blank feature store test image");
+
+    image_search::LocalFeatureStore store(paths);
+    checkThrows([&] { store.features(0); },
+                "feature store returned features before loading them");
+
+    // a repeated index is extracted once
+    store.load({1, 0, 1});
+    check(store.loaded_count() == 2, "feature store loaded the wrong number of images");
+    const auto direct = image_search::extract_sift_features(paths[0]);
+    const auto& stored = store.features(0);
+    check(stored.points == direct.points &&
+              stored.descriptors.data == direct.descriptors.data &&
+              stored.width == 160 && stored.height == 120,
+          "feature store returned different features than direct extraction");
+    // already stored, nothing new is extracted
+    store.load({0});
+    check(store.loaded_count() == 2, "feature store extracted an image twice");
+
+    // a failed load stores nothing
+    checkThrows([&] { store.load({2}); },
+                "feature store accepted an image without descriptors");
+    checkThrows([&] { store.features(2); },
+                "feature store kept a failed image");
+    checkThrows([&] { store.load({3}); },
+                "feature store accepted an out-of-range index");
+    check(store.loaded_count() == 2, "failed loads changed the feature store");
+
+    for(const auto& path : paths)
+        std::filesystem::remove(path);
 }
 
 // Test strict Lowe-ratio matching, tie handling and insufficient candidates.
@@ -564,6 +616,7 @@ int main() {
         testCandidateRetrieval();
         testDatasetPaths();
         testLocalFeatures();
+        testLocalFeatureStore();
         testDescriptorMatching();
         testHomographyProjection();
         testHomographyEstimation();
