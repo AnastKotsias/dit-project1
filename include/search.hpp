@@ -93,6 +93,13 @@ public:
 
     // the top 10 among the vectors sharing a bucket with the query in any table, ranked by Euclidean distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+    // the first candidate_count candidates in the order of search(), with their original ranks
+    // fewer if the method finds fewer candidates; throws if candidate_count is zero
+    CandidateSearchResult candidates(
+        const std::vector<double>& query_bow,
+        const std::string& query_id,
+        std::size_t candidate_count) const;
 };
 
 // random projection to a hypercube of `projections` dimensions, where each vertex is a bucket
@@ -108,6 +115,13 @@ public:
 
     // the top 10 among the vectors of the probed vertices, ranked by Euclidean distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+    // the first candidate_count candidates in the order of search(), with their original ranks
+    // fewer if the method finds fewer candidates; throws if candidate_count is zero
+    CandidateSearchResult candidates(
+        const std::vector<double>& query_bow,
+        const std::string& query_id,
+        std::size_t candidate_count) const;
 };
 
 // inverted file index that stores the full vectors in the lists of their nearest k-means cluster
@@ -127,6 +141,13 @@ public:
 
     // the top 10 among the vectors of the `probes` nearest clusters, ranked by Euclidean distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+    // the first candidate_count candidates in the order of search(), with their original ranks
+    // fewer if the method finds fewer candidates; throws if candidate_count is zero
+    CandidateSearchResult candidates(
+        const std::vector<double>& query_bow,
+        const std::string& query_id,
+        std::size_t candidate_count) const;
 };
 
 // inverted file index that stores each vector as the product-quantized residual from its cluster center
@@ -147,6 +168,13 @@ public:
     // the 10 vectors of the probed clusters with the smallest asymmetric distance (ADC) to the query
     // there is no reranking by exact distance
     SearchResult search(const std::vector<double>& query_bow, const std::string& query_id, const std::string& sequence_id) const;
+
+    // the first candidate_count candidates in the order of search(), with their original ranks
+    // fewer if the method finds fewer candidates; throws if candidate_count is zero
+    CandidateSearchResult candidates(
+        const std::vector<double>& query_bow,
+        const std::string& query_id,
+        std::size_t candidate_count) const;
 };
 
 // writes the method name, every query's ranking and metrics, and the mean metrics to the output file

@@ -66,6 +66,17 @@ SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::v
 // only LSH can produce duplicates and removes them itself
 SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start);
 
+// returns the candidate count C, throws unless at least one candidate is requested
+std::size_t checkedCandidateCount(std::size_t count);
+
+// TopC of a query whose distinct candidates are already in rank order: keeps the first count,
+// each with its database index and original rank, and stops the timer that started at start
+CandidateSearchResult buildRankedCandidates(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, std::size_t count, std::size_t examined, const std::string& queryId, std::chrono::steady_clock::time_point start);
+
+// TopC of Exact, LSH, Hypercube and IVFFlat: ranks the candidates by exact distance like
+// buildResult, then calls buildRankedCandidates
+CandidateSearchResult buildCandidateResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, std::size_t count, std::chrono::steady_clock::time_point start);
+
 // base class of all indexes, which owns the database vectors and validates them
 // throws if the database is empty, the sizes of vectors and identifiers differ, the vectors have
 // zero or inconsistent dimensions or non-finite values, or an identifier is empty

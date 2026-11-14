@@ -106,9 +106,9 @@ struct IVFPQSearch::Impl : DatabaseIndex {
         }
     }
 
-    // returns the database indices of the 10 smallest ADC distances among the probed lists, nearest first
+    // returns the database indices of the limit smallest ADC distances among the probed lists, nearest first
     // examined receives the number of ADC distances computed
-    std::vector<std::size_t> candidates(const Vector& query, int probes, std::size_t& examined) const {
+    std::vector<std::size_t> candidates(const Vector& query, int probes, std::size_t limit, std::size_t& examined) const {
         const auto selected = nearestCenters(query, centers, probes);
         const std::size_t codebookSize = codebooks.front().rows;
         // vectors of the probed lists with their ADC distance to the query
@@ -139,8 +139,8 @@ struct IVFPQSearch::Impl : DatabaseIndex {
         }
 
         examined = ranked.size();
-        // only the 10 nearest by ADC are returned, there is no reranking by exact distance
-        const std::size_t limit = std::min<std::size_t>(10, ranked.size());
+        // only the limit nearest by ADC are returned, there is no reranking by exact distance
+        limit = std::min(limit, ranked.size());
         std::partial_sort(ranked.begin(), ranked.begin() + limit, ranked.end());
         std::vector<std::size_t> result;
         for(std::size_t i = 0; i < limit; ++i)
@@ -164,8 +164,18 @@ SearchResult IVFPQSearch::search(const Vector& query, const std::string& queryId
     // checked first, since the lookup tables index the query by the database dimension
     validateQuery(impl->database, query);
     std::size_t examined = 0;
-    const auto ranked = impl->candidates(query, probes, examined);
+    const auto ranked = impl->candidates(query, probes, 10, examined);
     return buildRankedResult(impl->ids, ranked, examined, queryId, sequenceId, start);
+}
+
+CandidateSearchResult IVFPQSearch::candidates(const Vector& query, const std::string& queryId, std::size_t candidateCount) const {
+    checkedCandidateCount(candidateCount);
+    const auto start = std::chrono::steady_clock::now();
+    validateQuery(impl->database, query);
+    std::size_t examined = 0;
+    // TopC by ADC, as in search()
+    const auto ranked = impl->candidates(query, probes, candidateCount, examined);
+    return buildRankedCandidates(impl->ids, ranked, candidateCount, examined, queryId, start);
 }
 
 } // namespace image_search

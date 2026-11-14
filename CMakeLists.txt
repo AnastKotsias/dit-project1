@@ -67,6 +67,10 @@ if(BUILD_TESTING)
         src/kmeans.cpp
         src/search/common.cpp
         src/search/exact.cpp
+        src/search/lsh.cpp
+        src/search/hypercube.cpp
+        src/search/ivfflat.cpp
+        src/search/ivfpq.cpp
         src/search/output.cpp
     )
 

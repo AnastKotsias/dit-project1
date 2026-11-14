@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -134,6 +135,64 @@ void testExactSearch() {
                 "exact candidate retrieval accepted zero candidates");
     checkThrows([&] { search.search({0.0}, "query", "sequence"); }, "exact search accepted a query with the wrong dimension");
     checkThrows([&] { ExactSearch({}, {}); }, "exact search accepted an empty database");
+}
+
+// Check that TopC of one index agrees with its search() ranking.
+template<typename Index>
+void checkCandidateRetrieval(const Index& index, const std::vector<double>& query,
+                             const std::string& name) {
+    const auto top = index.search(query, "query", "sequence");
+    const auto first_10 = index.candidates(query, "query", 10);
+    const auto first_25 = index.candidates(query, "query", 25);
+    check(!first_10.candidates.empty(), name + " returned no candidates");
+    check(first_10.query_id == "query", name + " candidates have the wrong query id");
+    check(first_25.candidates.size() <= 25, name + " returned more than C candidates");
+
+    // the first 10 of TopC are the top 10 of search()
+    std::vector<std::string> first_10_ids;
+    for(const auto& candidate : first_10.candidates)
+        first_10_ids.push_back(candidate.id);
+    check(first_10_ids == top.top_10_ids,
+          name + " TopC does not start with the search() ranking");
+    // a larger C extends the same ranking
+    for(std::size_t rank = 0; rank < first_25.candidates.size(); ++rank) {
+        const auto& candidate = first_25.candidates[rank];
+        check(candidate.original_rank == rank,
+              name + " candidate has the wrong original rank");
+        if(rank < first_10.candidates.size())
+            check(candidate.database_index == first_10.candidates[rank].database_index,
+                  name + " TopC changes with C");
+    }
+    checkThrows([&] { index.candidates(query, "query", 0); },
+                name + " accepted zero candidates");
+}
+
+// Test TopC retrieval of the approximate methods
+void testCandidateRetrieval() {
+    // 40 seeded points in 4 dimensions
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> coordinate(0.0, 1.0);
+    std::vector<std::vector<double>> database(40, std::vector<double>(4));
+    std::vector<std::string> ids;
+    for(std::size_t i = 0; i < database.size(); ++i) {
+        for(double& value : database[i])
+            value = coordinate(rng);
+        ids.push_back("image" + std::to_string(i));
+    }
+    const std::vector<double> query = {0.5, 0.5, 0.5, 0.5};
+
+    // parameters that leave at least ten candidates
+    checkCandidateRetrieval(image_search::LSHSearch(database, ids, 2, 3, 10.0), query, "LSH");
+    checkCandidateRetrieval(
+        image_search::HypercubeSearch(database, ids, 3, 10.0, 40, 8), query, "Hypercube");
+    checkCandidateRetrieval(image_search::IVFFlatSearch(database, ids, 2, 2), query, "IVFFlat");
+    checkCandidateRetrieval(
+        image_search::IVFPQSearch(database, ids, 2, 2, 2, 2), query, "IVFPQ");
+
+    // M = 5 gives fewer than C candidates
+    const image_search::HypercubeSearch limited(database, ids, 3, 10.0, 5, 8);
+    check(limited.candidates(query, "query", 10).candidates.size() == 5,
+          "Hypercube TopC exceeded the candidate budget M");
 }
 
 // Test the dataset path generation.
@@ -502,6 +561,7 @@ int main() {
         testMatrixAndDistance();
         testKmeans();
         testExactSearch();
+        testCandidateRetrieval();
         testDatasetPaths();
         testLocalFeatures();
         testDescriptorMatching();

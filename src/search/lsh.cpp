@@ -115,4 +115,12 @@ SearchResult LSHSearch::search(const Vector& query, const std::string& queryId, 
     return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
 }
 
+CandidateSearchResult LSHSearch::candidates(const Vector& query, const std::string& queryId, std::size_t candidateCount) const {
+    checkedCandidateCount(candidateCount);
+    const auto start = std::chrono::steady_clock::now();
+    validateQuery(impl->database, query);
+    // same bucket candidates as search(), ranked by exact distance
+    return buildCandidateResult(impl->database, impl->ids, impl->candidates(query), query, queryId, candidateCount, start);
+}
+
 } // namespace image_search

@@ -13,8 +13,8 @@
 namespace image_search {
 using namespace detail;
 
-// hypercube index: each of the d' projections h_i(p) = floor((p.v + t) / w) contributes one bit, so a
-// point maps to a vertex of the d'-dimensional cube, which is its bucket
+// hypercube index: each of the d' projections h_i(p) = floor((p.v + t) / w) contributes one bit f_i(h_i(p)),
+// so a point maps to the vertex [f_1(h_1(p)), ..., f_d'(h_d'(p))] of the d'-dimensional cube, which is its bucket
 struct HypercubeSearch::Impl : DatabaseIndex {
     // dimension d' of the cube
     int projections;
@@ -68,7 +68,8 @@ struct HypercubeSearch::Impl : DatabaseIndex {
             buckets[hash(database[i])].push_back(i);
     }
 
-    // pseudo-randomly maps the window number of a projection to 0 or 1 with a seeded integer mixing function
+    // f_i: window number h_i -> {0, 1}, uniform over the window numbers
+    // seeded hash, so the same h_i gets the same bit at build and query time
     int mapToBit(int projection, std::int64_t bucket) const {
         std::uint64_t value = bitSeed ^
             (static_cast<std::uint64_t>(projection) +
@@ -89,6 +90,7 @@ struct HypercubeSearch::Impl : DatabaseIndex {
         for(int i = 0; i < projections; ++i) {
             const double dot = std::inner_product(point.begin(), point.end(), vectors[i].begin(), 0.0);
             const std::int64_t bucket = windowIndex(dot + offsets[i], width);
+            // bit i = f_i(h_i(p))
             if(mapToBit(i, bucket) != 0)
                 value |= (1 << i);
         }
@@ -151,6 +153,14 @@ SearchResult HypercubeSearch::search(const Vector& query, const std::string& que
     // checked before hashing, since a non-finite query cannot be mapped to a vertex
     validateQuery(impl->database, query);
     return buildResult(impl->database, impl->ids, impl->candidates(query), query, queryId, sequenceId, start);
+}
+
+CandidateSearchResult HypercubeSearch::candidates(const Vector& query, const std::string& queryId, std::size_t candidateCount) const {
+    checkedCandidateCount(candidateCount);
+    const auto start = std::chrono::steady_clock::now();
+    validateQuery(impl->database, query);
+    // at most M candidates, so fewer than C when M < C
+    return buildCandidateResult(impl->database, impl->ids, impl->candidates(query), query, queryId, candidateCount, start);
 }
 
 } // namespace image_search

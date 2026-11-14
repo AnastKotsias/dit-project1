@@ -76,9 +76,11 @@ Clustering trainIVFClusters(const std::vector<Vector>& points, int requested, in
     return clustering;
 }
 
-// the cost depends only on the number of candidates and not on the database size, so the query
-// times of the approximate methods have no O(n) term
-SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start) {
+namespace {
+
+// the first limit candidates by exact distance to the query, nearest first
+// (distance, index) pairs, so equal distances keep the smaller database index first
+std::vector<std::size_t> rankByDistance(const std::vector<Vector>& database, const std::vector<std::size_t>& candidates, const Vector& query, std::size_t limit) {
     std::vector<ScoredId> ranked;
     ranked.reserve(candidates.size());
     for(const auto index : candidates) {
@@ -86,15 +88,55 @@ SearchResult buildResult(const std::vector<Vector>& database, const std::vector<
         ranked.emplace_back(squaredEuclideanDistance(query, database[index]), index);
     }
 
-    // positions left unfilled by fewer than 10 candidates count as non-relevant
-    const std::size_t limit = std::min<std::size_t>(10, ranked.size());
+    limit = std::min(limit, ranked.size());
     std::partial_sort(ranked.begin(), ranked.begin() + limit, ranked.end());
     std::vector<std::size_t> order;
+    order.reserve(limit);
     for(std::size_t i = 0; i < limit; ++i) {
         order.push_back(ranked[i].second);
     }
+    return order;
+}
+
+} // namespace
+
+// the cost depends only on the number of candidates and not on the database size, so the query
+// times of the approximate methods have no O(n) term
+SearchResult buildResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, const std::string& sequenceId, std::chrono::steady_clock::time_point start) {
+    // positions left unfilled by fewer than 10 candidates count as non-relevant
+    const auto order = rankByDistance(database, candidates, query, 10);
     // every candidate cost one exact distance computation
-    return buildRankedResult(ids, order, ranked.size(), queryId, sequenceId, start);
+    return buildRankedResult(ids, order, candidates.size(), queryId, sequenceId, start);
+}
+
+std::size_t checkedCandidateCount(std::size_t count) {
+    if(count == 0)
+        throw std::invalid_argument("candidate count must be positive");
+    return count;
+}
+
+CandidateSearchResult buildRankedCandidates(const std::vector<std::string>& ids, const std::vector<std::size_t>& ranked, std::size_t count, std::size_t examined, const std::string& queryId, std::chrono::steady_clock::time_point start) {
+    CandidateSearchResult result;
+    result.query_id = queryId;
+    // fewer than C when the method found fewer candidates
+    const std::size_t limit = std::min(count, ranked.size());
+    result.candidates.reserve(limit);
+    for(std::size_t rank = 0; rank < limit; ++rank) {
+        assert(ranked[rank] < ids.size());
+        // zero-based original rank, the last tie-break of the geometric reranking
+        result.candidates.push_back({ranked[rank], rank, ids[ranked[rank]]});
+    }
+    result.candidates_examined = examined;
+    // T_candidates stops once TopC is available
+    result.query_time_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    return result;
+}
+
+CandidateSearchResult buildCandidateResult(const std::vector<Vector>& database, const std::vector<std::string>& ids, const std::vector<std::size_t>& candidates, const Vector& query, const std::string& queryId, std::size_t count, std::chrono::steady_clock::time_point start) {
+    // same ranking as buildResult, so the first 10 of TopC are the top 10 of search()
+    const auto order = rankByDistance(database, candidates, query, count);
+    return buildRankedCandidates(ids, order, count, candidates.size(), queryId, start);
 }
 
 void validateQuery(const std::vector<Vector>& database, const Vector& query) {

@@ -55,4 +55,12 @@ SearchResult IVFFlatSearch::search(const Vector& query, const std::string& query
     return buildResult(impl->database, impl->ids, impl->candidates(query, probes), query, queryId, sequenceId, start);
 }
 
+CandidateSearchResult IVFFlatSearch::candidates(const Vector& query, const std::string& queryId, std::size_t candidateCount) const {
+    checkedCandidateCount(candidateCount);
+    const auto start = std::chrono::steady_clock::now();
+    validateQuery(impl->database, query);
+    // vectors of the nprobe nearest lists, ranked by exact distance
+    return buildCandidateResult(impl->database, impl->ids, impl->candidates(query, probes), query, queryId, candidateCount, start);
+}
+
 } // namespace image_search
