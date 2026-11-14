@@ -3,6 +3,7 @@
 
 #include "descriptor_matching.hpp"
 #include "homography.hpp"
+#include "search.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +28,23 @@ struct RansacConfig {
 HomographyResult estimate_homography_ransac(
     const std::vector<DescriptorMatch>& matches,
     const RansacConfig& config);
+
+// RANSAC outcome of one TopC candidate
+struct CandidateVerification {
+    SearchCandidate candidate;
+    // matches accepted by the Lowe test
+    std::size_t match_count = 0;
+    // invalid when RANSAC fails
+    HomographyResult homography;
+};
+
+// S(I) = number of final inliers, zero on RANSAC failure
+std::size_t final_inlier_count(const CandidateVerification& verification);
+
+// more final inliers first, then smaller median error,
+// then smaller original rank
+std::vector<CandidateVerification> rerank_candidates(
+    std::vector<CandidateVerification> verifications);
 
 }  // namespace image_search
 

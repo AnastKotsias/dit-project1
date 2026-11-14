@@ -205,4 +205,41 @@ HomographyResult estimate_homography_ransac(
     return result;
 }
 
+std::size_t final_inlier_count(const CandidateVerification& verification) {
+    // RANSAC failure gives zero inliers by convention
+    if(!verification.homography.valid)
+        return 0;
+    return verification.homography.inlier_indices.size();
+}
+
+std::vector<CandidateVerification> rerank_candidates(
+    std::vector<CandidateVerification> verifications) {
+    // missing median ranks after any finite median
+    const auto median_of = [](const CandidateVerification& verification) {
+        if(!verification.homography.valid)
+            return std::numeric_limits<double>::infinity();
+        return verification.homography.median_error.value_or(
+            std::numeric_limits<double>::infinity());
+    };
+
+    std::sort(verifications.begin(), verifications.end(),
+              [&](const CandidateVerification& first,
+                  const CandidateVerification& second) {
+        // 1st key: S(I) descending
+        const std::size_t first_inliers = final_inlier_count(first);
+        const std::size_t second_inliers = final_inlier_count(second);
+        if(first_inliers != second_inliers)
+            return first_inliers > second_inliers;
+        // 2nd key: median inlier error ascending
+        const double first_median = median_of(first);
+        const double second_median = median_of(second);
+        if(first_median != second_median)
+            return first_median < second_median;
+        // 3rd key: original BoVW/ANN order
+        // failed candidates keep their relative order
+        return first.candidate.original_rank < second.candidate.original_rank;
+    });
+    return verifications;
+}
+
 }  // namespace image_search

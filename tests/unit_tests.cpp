@@ -437,6 +437,63 @@ void testHomographyRansac() {
           "RANSAC failed when an inlier location was repeated");
 }
 
+// Build a verified candidate with the given original rank, inlier count and median error.
+image_search::CandidateVerification verifiedCandidate(
+    std::size_t original_rank, std::size_t inliers, double median) {
+    image_search::CandidateVerification verification;
+    verification.candidate = {original_rank, original_rank,
+                              "candidate" + std::to_string(original_rank)};
+    verification.homography.valid = true;
+    verification.homography.inlier_indices.resize(inliers);
+    verification.homography.median_error = median;
+    return verification;
+}
+
+// Build a candidate for which RANSAC failed.
+image_search::CandidateVerification failedCandidate(std::size_t original_rank) {
+    image_search::CandidateVerification verification;
+    verification.candidate = {original_rank, original_rank,
+                              "candidate" + std::to_string(original_rank)};
+    return verification;
+}
+
+// Test geometric reranking by inliers, median error and original rank
+void testGeometricReranking() {
+    // input in original order
+    const std::vector<image_search::CandidateVerification> verifications = {
+        failedCandidate(0),
+        verifiedCandidate(1, 6, 1.0),
+        verifiedCandidate(2, 8, 2.0),
+        verifiedCandidate(3, 6, 0.5),
+        failedCandidate(4),
+        // same inliers and median as rank 3
+        verifiedCandidate(5, 6, 0.5)};
+
+    // failure counts as zero inliers
+    check(image_search::final_inlier_count(verifications[0]) == 0 &&
+              image_search::final_inlier_count(verifications[2]) == 8,
+          "final inlier count is incorrect");
+
+    // 8 inliers first, then 6 inliers by median, then rank, failures last
+    const std::vector<std::size_t> expected = {2, 3, 5, 1, 0, 4};
+    const auto reranked = image_search::rerank_candidates(verifications);
+    check(reranked.size() == expected.size(),
+          "reranking changed the number of candidates");
+    for(std::size_t position = 0; position < expected.size(); ++position) {
+        check(reranked[position].candidate.original_rank == expected[position],
+              "geometric reranking order is incorrect");
+    }
+
+    // failed candidates keep their original relative order
+    std::vector<image_search::CandidateVerification> all_failed = {
+        failedCandidate(2), failedCandidate(0), failedCandidate(1)};
+    const auto failed_reranked = image_search::rerank_candidates(all_failed);
+    check(failed_reranked[0].candidate.original_rank == 0 &&
+              failed_reranked[1].candidate.original_rank == 1 &&
+              failed_reranked[2].candidate.original_rank == 2,
+          "failed candidates did not keep the original order");
+}
+
 }
 
 int main() {
@@ -451,6 +508,7 @@ int main() {
         testHomographyProjection();
         testHomographyEstimation();
         testHomographyRansac();
+        testGeometricReranking();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;
