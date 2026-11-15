@@ -548,6 +548,65 @@ void testHomographyRansac() {
           "RANSAC failed when an inlier location was repeated");
 }
 
+// Build features where point i has its own descriptor, so it only matches point i of an image built the same way.
+image_search::LocalFeatureSet distinctFeatures(const std::vector<image_search::Point2>& points) {
+    image_search::LocalFeatureSet features;
+    features.points = points;
+    features.descriptors = image_search::DescriptorMatrix(points.size(), 128);
+    // D1 = 0 for the same row, D2 = 2 * 100^2 for any other row
+    for(std::size_t row = 0; row < points.size(); ++row)
+        features.descriptors.row(row)[row] = 100.0F;
+    features.status = image_search::SiftExtractionStatus::Success;
+    return features;
+}
+
+// Test matching followed by RANSAC for one candidate
+void testCandidateVerification() {
+    // tutorial check: 5 correct pairs (x, y) -> (x + 20, y + 10) and 2 wrong matches
+    const std::vector<image_search::Point2> query_points = {
+        {0.0, 0.0}, {100.0, 0.0}, {0.0, 100.0}, {100.0, 100.0},
+        {50.0, 30.0}, {30.0, 30.0}, {70.0, 50.0}};
+    std::vector<image_search::Point2> candidate_points;
+    for(std::size_t index = 0; index < 5; ++index)
+        candidate_points.push_back({query_points[index][0] + 20.0,
+                                    query_points[index][1] + 10.0});
+    candidate_points.push_back({200.0, 150.0});
+    candidate_points.push_back({15.0, 180.0});
+    const auto query = distinctFeatures(query_points);
+    const auto candidate_features = distinctFeatures(candidate_points);
+
+    const image_search::SearchCandidate candidate{42, 3, "v_bird/2"};
+    image_search::RansacConfig config;
+    config.maximum_trials = 500;
+    const auto verification = image_search::verify_candidate(
+        candidate, query, candidate_features, 0.8, config);
+    check(verification.candidate.database_index == 42 &&
+              verification.candidate.original_rank == 3 &&
+              verification.candidate.id == "v_bird/2",
+          "candidate verification lost the candidate identity");
+    // all 7 descriptor matches pass Lowe, RANSAC keeps the 5 correct ones
+    check(verification.match_count == 7,
+          "candidate verification did not count the Lowe matches");
+    const std::vector<std::size_t> expected_inliers = {0, 1, 2, 3, 4};
+    check(verification.homography.valid &&
+              verification.homography.inlier_indices == expected_inliers,
+          "candidate verification did not isolate the synthetic inliers");
+    check(equalUpToScale(verification.homography.matrix,
+                         {1.0, 0.0, 20.0, 0.0, 1.0, 10.0, 0.0, 0.0, 1.0}),
+          "candidate verification did not estimate the expected translation");
+
+    // M = 3 < 4 matches: RANSAC failure, S(I) = 0
+    const auto few = distinctFeatures({{0.0, 0.0}, {100.0, 0.0}, {0.0, 100.0}});
+    const auto failed = image_search::verify_candidate(
+        candidate, few, candidate_features, 0.8, config);
+    check(failed.match_count == 3 && !failed.homography.valid &&
+              image_search::final_inlier_count(failed) == 0,
+          "candidate verification accepted fewer than four matches");
+    checkThrows([&] {
+        image_search::verify_candidate(candidate, query, candidate_features, 1.0, config);
+    }, "candidate verification accepted an invalid rho");
+}
+
 // Build a verified candidate with the given original rank, inlier count and median error.
 image_search::CandidateVerification verifiedCandidate(
     std::size_t original_rank, std::size_t inliers, double median) {
@@ -621,6 +680,7 @@ int main() {
         testHomographyProjection();
         testHomographyEstimation();
         testHomographyRansac();
+        testCandidateVerification();
         testGeometricReranking();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';

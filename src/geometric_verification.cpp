@@ -205,6 +205,23 @@ HomographyResult estimate_homography_ransac(
     return result;
 }
 
+CandidateVerification verify_candidate(
+    const SearchCandidate& candidate,
+    const LocalFeatureSet& query_features,
+    const LocalFeatureSet& candidate_features,
+    double rho,
+    const RansacConfig& config) {
+    CandidateVerification verification;
+    verification.candidate = candidate;
+    // Lowe test: d1 < rho d2
+    const auto matches = match_descriptors(query_features, candidate_features, rho);
+    // M, also the naive ranking by accepted matches
+    verification.match_count = matches.size();
+    // M < 4 or no valid H: invalid result, S(I) = 0
+    verification.homography = estimate_homography_ransac(matches, config);
+    return verification;
+}
+
 std::size_t final_inlier_count(const CandidateVerification& verification) {
     // RANSAC failure gives zero inliers by convention
     if(!verification.homography.valid)

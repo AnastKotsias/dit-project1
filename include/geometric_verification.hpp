@@ -38,6 +38,15 @@ struct CandidateVerification {
     HomographyResult homography;
 };
 
+// match_sift(Q, I, rho), then estimate_ransac on the accepted matches
+// no HPatches ground truth used here
+CandidateVerification verify_candidate(
+    const SearchCandidate& candidate,
+    const LocalFeatureSet& query_features,
+    const LocalFeatureSet& candidate_features,
+    double rho,
+    const RansacConfig& config);
+
 // S(I) = number of final inliers, zero on RANSAC failure
 std::size_t final_inlier_count(const CandidateVerification& verification);
 
