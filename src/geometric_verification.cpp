@@ -1,6 +1,7 @@
 #include "geometric_verification.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <random>
@@ -257,6 +258,30 @@ std::vector<CandidateVerification> rerank_candidates(
         return first.candidate.original_rank < second.candidate.original_rank;
     });
     return verifications;
+}
+
+VerificationResult verify_candidates(
+    const std::vector<SearchCandidate>& candidates,
+    const LocalFeatureSet& query_features,
+    const FeatureLookup& load_features,
+    double rho,
+    const RansacConfig& config) {
+    // T_verify starts once TopC(Q) is available
+    const auto start = std::chrono::steady_clock::now();
+    std::vector<CandidateVerification> verifications;
+    verifications.reserve(candidates.size());
+    // only the returned candidates, fewer than C for some ANN methods
+    for(const auto& candidate : candidates)
+        verifications.push_back(verify_candidate(
+            candidate, query_features, load_features(candidate.database_index),
+            rho, config));
+
+    VerificationResult result;
+    // S(I) descending, median ascending, original rank
+    result.ranking = rerank_candidates(std::move(verifications));
+    result.verification_time_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    return result;
 }
 
 }  // namespace image_search

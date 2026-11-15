@@ -607,6 +607,59 @@ void testCandidateVerification() {
     }, "candidate verification accepted an invalid rho");
 }
 
+// Test verification of a whole TopC list followed by reranking
+void testCandidateListVerification() {
+    const std::vector<image_search::Point2> query_points = {
+        {0.0, 0.0}, {100.0, 0.0}, {0.0, 100.0}, {100.0, 100.0},
+        {50.0, 30.0}, {30.0, 30.0}, {70.0, 50.0}};
+    const auto query = distinctFeatures(query_points);
+
+    // database index 10: rows 3 to 6 tie at D1 = D2, so M = 3 and RANSAC fails
+    // database index 11: tutorial case, 5 inliers and 2 outliers
+    // database index 12: all 7 points translated, 7 inliers
+    std::vector<image_search::Point2> translated;
+    for(const auto& point : query_points)
+        translated.push_back({point[0] + 20.0, point[1] + 10.0});
+    auto with_outliers = translated;
+    with_outliers[5] = {200.0, 150.0};
+    with_outliers[6] = {15.0, 180.0};
+    const std::vector<image_search::LocalFeatureSet> database = {
+        distinctFeatures({translated.begin(), translated.begin() + 3}),
+        distinctFeatures(with_outliers),
+        distinctFeatures(translated)};
+
+    std::vector<std::size_t> requested;
+    const image_search::FeatureLookup lookup =
+        [&](std::size_t index) -> const image_search::LocalFeatureSet& {
+            requested.push_back(index);
+            return database.at(index - 10);
+        };
+    const std::vector<image_search::SearchCandidate> candidates = {
+        {10, 0, "first"}, {11, 1, "second"}, {12, 2, "third"}};
+    image_search::RansacConfig config;
+    config.maximum_trials = 500;
+    const auto result = image_search::verify_candidates(
+        candidates, query, lookup, 0.8, config);
+
+    check(requested == std::vector<std::size_t>({10, 11, 12}),
+          "candidate list verification looked up the wrong database indices");
+    check(result.ranking.size() == 3 &&
+              result.ranking[0].candidate.id == "third" &&
+              result.ranking[1].candidate.id == "second" &&
+              result.ranking[2].candidate.id == "first",
+          "candidate list verification did not rerank by final inliers");
+    check(image_search::final_inlier_count(result.ranking[0]) == 7 &&
+              image_search::final_inlier_count(result.ranking[1]) == 5 &&
+              image_search::final_inlier_count(result.ranking[2]) == 0,
+          "candidate list verification returned wrong inlier counts");
+    check(result.verification_time_ms >= 0.0,
+          "candidate list verification returned a negative time");
+
+    // fewer returned candidates verify only those, none here
+    const auto empty = image_search::verify_candidates({}, query, lookup, 0.8, config);
+    check(empty.ranking.empty(), "candidate list verification invented candidates");
+}
+
 // Build a verified candidate with the given original rank, inlier count and median error.
 image_search::CandidateVerification verifiedCandidate(
     std::size_t original_rank, std::size_t inliers, double median) {
@@ -682,6 +735,7 @@ int main() {
         testHomographyRansac();
         testCandidateVerification();
         testGeometricReranking();
+        testCandidateListVerification();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';
         return 1;

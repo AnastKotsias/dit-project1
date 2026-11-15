@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace image_search {
@@ -54,6 +55,25 @@ std::size_t final_inlier_count(const CandidateVerification& verification);
 // then smaller original rank
 std::vector<CandidateVerification> rerank_candidates(
     std::vector<CandidateVerification> verifications);
+
+// geometric verification outcome of one query
+struct VerificationResult {
+    // every TopC candidate after reranking, the first 10 are returned
+    std::vector<CandidateVerification> ranking;
+    // T_verify: matching, Lowe test, RANSAC and reranking
+    double verification_time_ms = 0.0;
+};
+
+// load_features(image_id): stored features of a database index, no extraction
+using FeatureLookup = std::function<const LocalFeatureSet&(std::size_t)>;
+
+// verify_candidate for every TopC(Q) candidate, then rerank
+VerificationResult verify_candidates(
+    const std::vector<SearchCandidate>& candidates,
+    const LocalFeatureSet& query_features,
+    const FeatureLookup& load_features,
+    double rho,
+    const RansacConfig& config);
 
 }  // namespace image_search
 
