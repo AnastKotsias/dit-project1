@@ -1,5 +1,6 @@
 #include "dataset.hpp"
 #include "descriptor_matching.hpp"
+#include "geometric_evaluation.hpp"
 #include "geometric_verification.hpp"
 #include "homography.hpp"
 #include "local_features.hpp"
@@ -12,6 +13,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <random>
@@ -203,6 +205,48 @@ void testDatasetPaths() {
     check(paths.size() == 12, "training path count is incorrect");
     check(paths.front() == std::filesystem::path("dataset") / "v_bird" / "1.ppm", "first training path is incorrect");
     check(paths.back() == std::filesystem::path("dataset") / "i_bike" / "6.ppm", "last training path is incorrect");
+}
+
+// Write text to a temporary file and return its path.
+std::filesystem::path writeTemporaryFile(const std::string& name, const std::string& text) {
+    const auto path = std::filesystem::temp_directory_path() / name;
+    std::ofstream file(path);
+    file << text;
+    check(static_cast<bool>(file), "could not write temporary file " + path.string());
+    return path;
+}
+
+// Test the HPatches ground-truth homography path and file parsing
+void testGroundTruthHomography() {
+    check(image_search::ground_truth_homography_path("hp", "v_bird", 2) ==
+              std::filesystem::path("hp") / "v_bird" / "H_1_2",
+          "ground truth homography path is incorrect");
+    checkThrows([] { image_search::ground_truth_homography_path("hp", "v_bird", 1); },
+                "ground truth path accepted the query image");
+    checkThrows([] { image_search::ground_truth_homography_path("hp", "v_bird", 7); },
+                "ground truth path accepted a missing image");
+
+    // i_leuven layout: several spaces, upper-case exponent, trailing blank line
+    const auto valid = writeTemporaryFile("image_search_H_valid",
+        "0.5  -1E-5  20 \n0  1  10 \n-9.5E-6  0  1 \n\n");
+    const image_search::Matrix3 expected = {0.5, -1e-5, 20.0, 0.0, 1.0, 10.0,
+                                            -9.5e-6, 0.0, 1.0};
+    check(image_search::load_ground_truth_homography(valid) == expected,
+          "ground truth homography was not read row by row");
+
+    const auto short_file = writeTemporaryFile("image_search_H_short", "1 0 0\n0 1 0\n0 0\n");
+    const auto long_file = writeTemporaryFile("image_search_H_long", "1 0 0\n0 1 0\n0 0 1\n7\n");
+    const auto text_file = writeTemporaryFile("image_search_H_text", "1 0 0\n0 x 0\n0 0 1\n");
+    for(const auto& path : {short_file, long_file, text_file})
+        checkThrows([&] { image_search::load_ground_truth_homography(path); },
+                    "malformed ground truth homography was accepted: " + path.string());
+    checkThrows([] {
+        image_search::load_ground_truth_homography(
+            std::filesystem::temp_directory_path() / "image_search_H_missing");
+    }, "missing ground truth homography was accepted");
+
+    for(const auto& path : {valid, short_file, long_file, text_file})
+        std::filesystem::remove(path);
 }
 
 // Test the local-feature extraction status and the stored image size.
@@ -727,6 +771,7 @@ int main() {
         testExactSearch();
         testCandidateRetrieval();
         testDatasetPaths();
+        testGroundTruthHomography();
         testLocalFeatures();
         testLocalFeatureStore();
         testDescriptorMatching();

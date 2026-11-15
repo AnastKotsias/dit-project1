@@ -30,6 +30,7 @@ if(BUILD_SEARCH_APP)
         src/descriptor_matching.cpp
         src/homography.cpp
         src/geometric_verification.cpp
+        src/geometric_evaluation.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
@@ -64,6 +65,7 @@ if(BUILD_TESTING)
         src/descriptor_matching.cpp
         src/homography.cpp
         src/geometric_verification.cpp
+        src/geometric_evaluation.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
