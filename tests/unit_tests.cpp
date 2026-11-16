@@ -289,6 +289,64 @@ void testCornerError() {
     }, "corner error accepted a ground truth corner at infinity");
 }
 
+// Test the corner error and failure cases of the 5 relevant pairs of a query
+void testRelevantPairEvaluation() {
+    // <hp>/v_test/H_1_j, only for the pairs with a valid estimate
+    const auto hp_dir = std::filesystem::temp_directory_path() / "image_search_hp";
+    std::filesystem::create_directories(hp_dir / "v_test");
+    for(const std::string name : {"H_1_2", "H_1_3", "H_1_5"})
+        writeTemporaryFile("image_search_hp/v_test/" + name, "1 0 20\n0 1 10\n0 0 1\n");
+
+    const image_search::Matrix3 translation = {1, 0, 20, 0, 1, 10, 0, 0, 1};
+    const image_search::Matrix3 identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const image_search::Matrix3 at_infinity = {1, 0, 0, 0, 1, 0, 1, 0, 0};
+    const auto verified = [](std::size_t rank, const std::string& id, bool valid,
+                             const image_search::Matrix3& matrix) {
+        image_search::CandidateVerification verification;
+        verification.candidate = {rank, rank, id};
+        verification.homography.valid = valid;
+        verification.homography.matrix = matrix;
+        return verification;
+    };
+    // v_test/6 not in TopC, non-relevant candidates ignored
+    const std::vector<image_search::CandidateVerification> ranking = {
+        verified(0, "im7.jpg", true, identity),
+        verified(1, "v_test/5", true, at_infinity),
+        verified(2, "v_test/3", true, identity),
+        verified(3, "v_other/2", true, identity),
+        verified(4, "v_test/4", false, identity),
+        verified(5, "v_test/2", true, translation)};
+    const auto pairs = image_search::evaluate_relevant_pairs(
+        ranking, hp_dir.string(), "v_test", 160, 120);
+
+    for(int j = 2; j <= 6; ++j)
+        check(pairs[static_cast<std::size_t>(j - 2)].image_number == j,
+              "relevant pairs are not ordered by image number");
+    // H = H_GT: zero corner error
+    check(pairs[0].retrieved && pairs[0].corner_error.has_value() &&
+              std::abs(*pairs[0].corner_error) < 1e-12,
+          "relevant pair with the ground truth homography has a corner error");
+    // every corner off by (20, 10)
+    check(pairs[1].retrieved && pairs[1].corner_error.has_value() &&
+              std::abs(*pairs[1].corner_error - std::sqrt(500.0)) < 1e-12,
+          "relevant pair corner error is incorrect");
+    // RANSAC failure, no H_1_4 needed
+    check(pairs[2].retrieved && !pairs[2].corner_error.has_value(),
+          "failed RANSAC pair received a corner error");
+    // corner (0, 0) projected to infinity
+    check(pairs[3].retrieved && !pairs[3].corner_error.has_value(),
+          "pair with a corner at infinity received a corner error");
+    check(!pairs[4].retrieved && !pairs[4].corner_error.has_value(),
+          "relevant image outside TopC was evaluated");
+
+    // valid estimate without H_1_j^GT: error, not a silent skip
+    checkThrows([&] {
+        image_search::evaluate_relevant_pairs(
+            {verified(0, "v_test/6", true, identity)}, hp_dir.string(), "v_test", 160, 120);
+    }, "missing ground truth homography was skipped");
+    std::filesystem::remove_all(hp_dir);
+}
+
 // Test the local-feature extraction status and the stored image size.
 void testLocalFeatures() {
     const auto result = image_search::extract_sift_features(
@@ -813,6 +871,7 @@ int main() {
         testDatasetPaths();
         testGroundTruthHomography();
         testCornerError();
+        testRelevantPairEvaluation();
         testLocalFeatures();
         testLocalFeatureStore();
         testDescriptorMatching();

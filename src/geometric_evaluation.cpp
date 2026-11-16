@@ -1,5 +1,6 @@
 #include "geometric_evaluation.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <stdexcept>
@@ -64,6 +65,39 @@ std::optional<double> corner_error(const Matrix3& estimated,
     }
     // mean over the 4 corners
     return total / 4.0;
+}
+
+std::array<PairEvaluation, 5> evaluate_relevant_pairs(
+    const std::vector<CandidateVerification>& ranking,
+    const std::string& hp_dir, const std::string& sequence,
+    std::size_t query_width, std::size_t query_height) {
+    std::array<PairEvaluation, 5> pairs;
+    for(int j = 2; j <= 6; ++j) {
+        PairEvaluation& pair = pairs[static_cast<std::size_t>(j - 2)];
+        pair.image_number = j;
+        // R(Q) = {sequence/2, ..., sequence/6}
+        const std::string id = sequence + "/" + std::to_string(j);
+        const auto found = std::find_if(
+            ranking.begin(), ranking.end(),
+            [&](const CandidateVerification& verification) {
+                return verification.candidate.id == id;
+            });
+        // Ij not in TopC(Q): not verified, counts as a failure
+        if(found == ranking.end())
+            continue;
+        pair.retrieved = true;
+        // RANSAC failure: invalid and not accurate, no corner error
+        if(!found->homography.valid)
+            continue;
+
+        // H_GT enters only here, after verification
+        const Matrix3 ground_truth = load_ground_truth_homography(
+            ground_truth_homography_path(hp_dir, sequence, j));
+        // a_i corners of I1, nullopt if pi(H a_i) is not finite
+        pair.corner_error = corner_error(found->homography.matrix, ground_truth,
+                                         query_width, query_height);
+    }
+    return pairs;
 }
 
 }  // namespace image_search

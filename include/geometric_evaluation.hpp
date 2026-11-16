@@ -1,6 +1,7 @@
 #ifndef GEOMETRIC_EVALUATION_HPP
 #define GEOMETRIC_EVALUATION_HPP
 
+#include "geometric_verification.hpp"
 #include "homography.hpp"
 
 #include <array>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace image_search {
 
@@ -34,6 +36,26 @@ std::array<Point2, 4> image_corners(std::size_t width, std::size_t height);
 std::optional<double> corner_error(const Matrix3& estimated,
                                    const Matrix3& ground_truth,
                                    std::size_t width, std::size_t height);
+
+// accuracy of one relevant pair (Q = I1, Ij)
+struct PairEvaluation {
+    // j, 2 <= j <= 6
+    int image_number = 0;
+    // Ij belongs to TopC(Q), so RANSAC ran on it
+    bool retrieved = false;
+    // E_corner, set only for a valid estimate H_Q->Ij
+    std::optional<double> corner_error;
+};
+
+// the 5 relevant pairs (I1, Ij), j = 2..6, of the query sequence
+// ranking: the verified TopC(Q) candidates, in any order
+// query_width x query_height: size of I1, for the corners a_i
+// outside TopC or RANSAC failure: no corner error, never zero
+// H_1_j^GT loaded only for a valid estimate
+std::array<PairEvaluation, 5> evaluate_relevant_pairs(
+    const std::vector<CandidateVerification>& ranking,
+    const std::string& hp_dir, const std::string& sequence,
+    std::size_t query_width, std::size_t query_height);
 
 }  // namespace image_search
 
