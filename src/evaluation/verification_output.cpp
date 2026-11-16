@@ -27,6 +27,7 @@ void write_verification_results(const std::string& output_path,
     // sums over all queries, and every relevant pair for the rates
     RetrievalMetrics before_sum;
     RetrievalMetrics after_sum;
+    RetrievalMetrics match_count_sum;
     double candidate_time = 0.0, verification_time = 0.0, total_time = 0.0;
     std::vector<PairEvaluation> pairs;
 
@@ -65,7 +66,10 @@ void write_verification_results(const std::string& output_path,
                << "Before-AP@10: " << query.before_metrics.ap_10 << "\n"
                << "After-Recall@5: " << query.after_metrics.recall_5 << "\n"
                << "After-Recall@10: " << query.after_metrics.recall_10 << "\n"
-               << "After-AP@10: " << query.after_metrics.ap_10 << "\n\n";
+               << "After-AP@10: " << query.after_metrics.ap_10 << "\n"
+               << "MatchCount-Recall@5: " << query.match_count_metrics.recall_5 << "\n"
+               << "MatchCount-Recall@10: " << query.match_count_metrics.recall_10 << "\n"
+               << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n\n";
 
         before_sum.recall_5 += query.before_metrics.recall_5;
         before_sum.recall_10 += query.before_metrics.recall_10;
@@ -73,6 +77,9 @@ void write_verification_results(const std::string& output_path,
         after_sum.recall_5 += query.after_metrics.recall_5;
         after_sum.recall_10 += query.after_metrics.recall_10;
         after_sum.ap_10 += query.after_metrics.ap_10;
+        match_count_sum.recall_5 += query.match_count_metrics.recall_5;
+        match_count_sum.recall_10 += query.match_count_metrics.recall_10;
+        match_count_sum.ap_10 += query.match_count_metrics.ap_10;
         candidate_time += query.candidate_time_ms;
         verification_time += query.verification_time_ms;
         total_time += query.total_time_ms;
@@ -102,7 +109,11 @@ void write_verification_results(const std::string& output_path,
         output << kNotAvailable << "\n";
     // 1 and 3 px thresholds of the experimental study
     output << "AccurateHomographyRate1px: " << accuracy.accurate_rates[0] << "\n"
-           << "AccurateHomographyRate3px: " << accuracy.accurate_rates[1] << "\n";
+           << "AccurateHomographyRate3px: " << accuracy.accurate_rates[1] << "\n"
+           // means of the match-count ranking
+           << "MeanMatchCountRecall@5: " << match_count_sum.recall_5 / count << "\n"
+           << "MeanMatchCountRecall@10: " << match_count_sum.recall_10 / count << "\n"
+           << "MeanMatchCountMAP@10: " << match_count_sum.ap_10 / count << "\n";
 }
 
 }  // namespace image_search

@@ -524,6 +524,10 @@ void testQueryEvaluation() {
         candidates.candidates.push_back({rank, rank, id});
         verifications.push_back(verified(rank, id, inliers, matrix));
     }
+    // by matches: v_q/3, im0.jpg, v_q/2, then the rest in original order
+    verifications[10].match_count = 50;
+    verifications[0].match_count = 40;
+    verifications[1].match_count = 10;
     image_search::VerificationResult verification;
     verification.ranking = image_search::rerank_candidates(verifications);
     verification.verification_time_ms = 3.5;
@@ -542,6 +546,10 @@ void testQueryEvaluation() {
               std::abs(query.after_metrics.recall_5 - 0.4) < 1e-12 &&
               std::abs(query.after_metrics.ap_10 - 0.4) < 1e-12,
           "query evaluation metrics are incorrect");
+    // match-count ranking: relevant at ranks 1 and 3, AP = (1/1 + 2/3) / 5
+    check(std::abs(query.match_count_metrics.recall_5 - 0.4) < 1e-12 &&
+              std::abs(query.match_count_metrics.ap_10 - (1.0 + 2.0 / 3.0) / 5.0) < 1e-12,
+          "query evaluation match-count metrics are incorrect");
     check(query.candidate_time_ms == 2.0 && query.verification_time_ms == 3.5 &&
               query.total_time_ms == 5.5,
           "query total time is not T_candidates + T_verify");
@@ -591,6 +599,7 @@ void testVerificationOutput() {
     first.after = {valid, failed};
     first.before_metrics = {0.2, 0.2, 0.1};
     first.after_metrics = {0.2, 0.2, 0.2};
+    first.match_count_metrics = {0.2, 0.2, 0.05};
     first.candidate_time_ms = 2.0;
     first.verification_time_ms = 3.0;
     first.total_time_ms = 5.0;
@@ -626,7 +635,9 @@ void testVerificationOutput() {
           "verify output after-ranking lines are incorrect");
     check(text.find("After-MedianError-10: -\nBefore-Recall@5: 0.2000\nBefore-Recall@10: 0.2000\n"
                     "Before-AP@10: 0.1000\nAfter-Recall@5: 0.2000\nAfter-Recall@10: 0.2000\n"
-                    "After-AP@10: 0.2000\n\nQuery: i_b\n") != std::string::npos,
+                    "After-AP@10: 0.2000\nMatchCount-Recall@5: 0.2000\n"
+                    "MatchCount-Recall@10: 0.2000\nMatchCount-AP@10: 0.0500\n\nQuery: i_b\n") !=
+              std::string::npos,
           "verify output query metrics are incorrect");
     // 10 pairs, one valid with E_corner = 2 px
     const std::string summary =
@@ -635,7 +646,9 @@ void testVerificationOutput() {
         "AverageCandidateTimeMs: 3.0000\nAverageVerificationTimeMs: 2.0000\n"
         "AverageTotalTimeMs: 5.0000\nValidHomographyRate: 0.1000\n"
         "AccurateHomographyRate5px: 0.1000\nMeanCornerErrorPx: 2.0000\n"
-        "AccurateHomographyRate1px: 0.0000\nAccurateHomographyRate3px: 0.1000\n";
+        "AccurateHomographyRate1px: 0.0000\nAccurateHomographyRate3px: 0.1000\n"
+        "MeanMatchCountRecall@5: 0.1000\nMeanMatchCountRecall@10: 0.1000\n"
+        "MeanMatchCountMAP@10: 0.0250\n";
     check(text.size() >= summary.size() &&
               text.compare(text.size() - summary.size(), summary.size(), summary) == 0,
           "verify output summary is incorrect");

@@ -69,6 +69,8 @@ struct QueryEvaluation {
     std::vector<CandidateVerification> after;
     RetrievalMetrics before_metrics;
     RetrievalMetrics after_metrics;
+    // first 10 by Lowe match count, the comparison ranking of spec VII
+    RetrievalMetrics match_count_metrics;
     // T_total = T_candidates + T_verify
     double candidate_time_ms = 0.0;
     double verification_time_ms = 0.0;

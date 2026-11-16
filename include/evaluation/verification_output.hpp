@@ -12,7 +12,8 @@ namespace image_search {
 // method name, one block per query, then means, average times and homography rates
 // ranks missing from a short TopC printed as "-"
 // median error NA without a valid homography
-// AccurateHomographyRate1px/3px appended after the required fields
+// appended after the required fields: AccurateHomographyRate1px/3px and the
+// match-count ranking metrics, per query and as means
 // throws if queries is empty or the file cannot be opened
 void write_verification_results(const std::string& output_path,
                                 const std::string& method_name,

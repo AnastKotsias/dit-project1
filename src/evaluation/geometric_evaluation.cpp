@@ -123,6 +123,12 @@ QueryEvaluation evaluate_query(
     // same Recall/AP definitions before and after
     result.before_metrics = computeRetrievalMetrics(result.before_ids, sequence);
     result.after_metrics = computeRetrievalMetrics(after_ids, sequence);
+    // same candidates by Lowe matches only, untimed: not part of T_verify
+    const auto by_matches = rank_by_match_count(verification.ranking);
+    std::vector<std::string> match_count_ids;
+    for(std::size_t rank = 0; rank < shown; ++rank)
+        match_count_ids.push_back(by_matches[rank].candidate.id);
+    result.match_count_metrics = computeRetrievalMetrics(match_count_ids, sequence);
 
     // T_total(Q) = T_candidates(Q) + T_verify(Q)
     result.candidate_time_ms = candidates.query_time_ms;
