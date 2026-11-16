@@ -31,6 +31,7 @@ if(BUILD_SEARCH_APP)
         src/homography.cpp
         src/geometric_verification.cpp
         src/geometric_evaluation.cpp
+        src/verification_output.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp
@@ -66,6 +67,7 @@ if(BUILD_TESTING)
         src/homography.cpp
         src/geometric_verification.cpp
         src/geometric_evaluation.cpp
+        src/verification_output.cpp
         src/kmeans.cpp
         src/vocabulary.cpp
         src/pipeline.cpp

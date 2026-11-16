@@ -7,6 +7,7 @@
 #include "pipeline.hpp"
 #include "kmeans.hpp"
 #include "search.hpp"
+#include "verification_output.hpp"
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -16,6 +17,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -469,6 +471,82 @@ void testQueryEvaluation() {
         image_search::evaluate_query(few, few_verified, hp_dir.string(), "v_q", 160, 120);
     }, "query evaluation accepted a verification of fewer candidates");
     std::filesystem::remove_all(hp_dir);
+}
+
+// Test the verify output format, missing ranks, NA values and the means
+void testVerificationOutput() {
+    image_search::CandidateVerification valid;
+    valid.candidate = {0, 0, "v_a/2"};
+    valid.homography.valid = true;
+    valid.homography.inlier_indices = {0, 1, 2, 3, 4};
+    valid.homography.median_error = 0.5;
+    image_search::CandidateVerification failed;
+    failed.candidate = {1, 1, "im1.jpg"};
+
+    // TopC of 2: ranks 3 to 10 missing, one corner error of 2 px
+    image_search::QueryEvaluation first;
+    first.sequence = "v_a";
+    first.candidate_count = 2;
+    first.before_ids = {"im1.jpg", "v_a/2"};
+    first.after = {valid, failed};
+    first.before_metrics = {0.2, 0.2, 0.1};
+    first.after_metrics = {0.2, 0.2, 0.2};
+    first.candidate_time_ms = 2.0;
+    first.verification_time_ms = 3.0;
+    first.total_time_ms = 5.0;
+    first.pairs[0].retrieved = true;
+    first.pairs[0].corner_error = 2.0;
+    // TopC of 1, no relevant image, no valid estimate
+    image_search::QueryEvaluation second;
+    second.sequence = "i_b";
+    second.candidate_count = 1;
+    second.before_ids = {"im1.jpg"};
+    second.after = {failed};
+    second.candidate_time_ms = 4.0;
+    second.verification_time_ms = 1.0;
+    second.total_time_ms = 5.0;
+
+    const auto read_output = [](const std::filesystem::path& path) {
+        std::ifstream file(path);
+        return std::string(std::istreambuf_iterator<char>(file),
+                           std::istreambuf_iterator<char>());
+    };
+    const auto path = std::filesystem::temp_directory_path() / "image_search_verify_output";
+    image_search::write_verification_results(path.string(), "Exact", {first, second});
+    const std::string text = read_output(path);
+
+    check(text.rfind("Exact\nQuery: v_a\nCandidates: 2\n"
+                     "Before-Rank-1: im1.jpg\nBefore-Rank-2: v_a/2\nBefore-Rank-3: -\n", 0) == 0,
+          "verify output does not start with the method and first query");
+    // inliers 0 and median NA on RANSAC failure
+    check(text.find("After-Rank-1: v_a/2\nAfter-Inliers-1: 5\nAfter-MedianError-1: 0.5000\n"
+                    "After-Rank-2: im1.jpg\nAfter-Inliers-2: 0\nAfter-MedianError-2: NA\n"
+                    "After-Rank-3: -\nAfter-Inliers-3: -\nAfter-MedianError-3: -\n") !=
+              std::string::npos,
+          "verify output after-ranking lines are incorrect");
+    check(text.find("After-MedianError-10: -\nBefore-Recall@5: 0.2000\nBefore-Recall@10: 0.2000\n"
+                    "Before-AP@10: 0.1000\nAfter-Recall@5: 0.2000\nAfter-Recall@10: 0.2000\n"
+                    "After-AP@10: 0.2000\n\nQuery: i_b\n") != std::string::npos,
+          "verify output query metrics are incorrect");
+    // 10 pairs, one valid with E_corner = 2 px
+    const std::string summary =
+        "MeanBeforeRecall@5: 0.1000\nMeanBeforeRecall@10: 0.1000\nMeanBeforeMAP@10: 0.0500\n"
+        "MeanAfterRecall@5: 0.1000\nMeanAfterRecall@10: 0.1000\nMeanAfterMAP@10: 0.1000\n"
+        "AverageCandidateTimeMs: 3.0000\nAverageVerificationTimeMs: 2.0000\n"
+        "AverageTotalTimeMs: 5.0000\nValidHomographyRate: 0.1000\n"
+        "AccurateHomographyRate5px: 0.1000\nMeanCornerErrorPx: 2.0000\n"
+        "AccurateHomographyRate1px: 0.0000\nAccurateHomographyRate3px: 0.1000\n";
+    check(text.size() >= summary.size() &&
+              text.compare(text.size() - summary.size(), summary.size(), summary) == 0,
+          "verify output summary is incorrect");
+
+    // no valid estimate: mean corner error NA
+    image_search::write_verification_results(path.string(), "Exact", {second});
+    check(read_output(path).find("MeanCornerErrorPx: NA\n") != std::string::npos,
+          "verify output printed a mean corner error without a valid estimate");
+    checkThrows([&] { image_search::write_verification_results(path.string(), "Exact", {}); },
+                "verify output accepted no queries");
+    std::filesystem::remove(path);
 }
 
 // Test the valid and accurate rates and the mean corner error over all relevant pairs
@@ -1037,6 +1115,7 @@ int main() {
         testRelevantPairEvaluation();
         testQueryEvaluation();
         testHomographyAccuracy();
+        testVerificationOutput();
         testLocalFeatures();
         testLocalFeatureStore();
         testDescriptorMatching();
