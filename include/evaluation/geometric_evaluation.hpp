@@ -69,7 +69,7 @@ struct QueryEvaluation {
     std::vector<CandidateVerification> after;
     RetrievalMetrics before_metrics;
     RetrievalMetrics after_metrics;
-    // first 10 by Lowe match count, the comparison ranking of spec VII
+    // first 10 by Lowe match count, the ranking compared with RANSAC
     RetrievalMetrics match_count_metrics;
     // T_total = T_candidates + T_verify
     double candidate_time_ms = 0.0;
@@ -106,6 +106,25 @@ struct HomographyAccuracy {
 // throws if pairs is empty
 HomographyAccuracy summarize_homography_accuracy(
     const std::vector<PairEvaluation>& pairs);
+
+// summary lines of the output, over all queries or one group of them
+struct VerificationSummary {
+    std::size_t query_count = 0;
+    // mean Recall@5, Recall@10 and mAP@10 of each ranking
+    RetrievalMetrics before;
+    RetrievalMetrics after;
+    RetrievalMetrics match_count;
+    // average times per query
+    double candidate_time_ms = 0.0;
+    double verification_time_ms = 0.0;
+    double total_time_ms = 0.0;
+    // over the 5 |Q| relevant pairs of these queries
+    HomographyAccuracy accuracy;
+};
+
+// mAP@10 = 1/|Q| sum AP@10(Q), likewise the other means
+// throws if queries is empty
+VerificationSummary summarize_queries(const std::vector<QueryEvaluation>& queries);
 
 }  // namespace image_search
 

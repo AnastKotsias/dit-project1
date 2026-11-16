@@ -700,6 +700,45 @@ void testHomographyAccuracy() {
                 "homography accuracy accepted no relevant pairs");
 }
 
+// Test the means, average times and pair rates of a set of queries
+void testQuerySummary() {
+    image_search::QueryEvaluation first;
+    first.before_metrics = {0.2, 0.4, 0.1};
+    first.after_metrics = {0.6, 0.8, 0.5};
+    first.match_count_metrics = {0.4, 0.4, 0.3};
+    first.candidate_time_ms = 1.0;
+    first.verification_time_ms = 2.0;
+    first.total_time_ms = 3.0;
+    first.pairs[0].retrieved = true;
+    first.pairs[0].corner_error = 0.5;
+    // no relevant image retrieved, zero metrics
+    image_search::QueryEvaluation second;
+    second.candidate_time_ms = 3.0;
+    second.verification_time_ms = 4.0;
+    second.total_time_ms = 7.0;
+
+    const auto summary = image_search::summarize_queries({first, second});
+    const auto close = [](double value, double expected) {
+        return std::abs(value - expected) < 1e-12;
+    };
+    check(summary.query_count == 2 && close(summary.before.recall_5, 0.1) &&
+              close(summary.before.ap_10, 0.05) && close(summary.after.recall_10, 0.4) &&
+              close(summary.after.ap_10, 0.25) && close(summary.match_count.recall_5, 0.2) &&
+              close(summary.match_count.ap_10, 0.15),
+          "query summary means are incorrect");
+    check(close(summary.candidate_time_ms, 2.0) && close(summary.verification_time_ms, 3.0) &&
+              close(summary.total_time_ms, 5.0),
+          "query summary average times are incorrect");
+    // one valid pair of 2 * 5
+    check(close(summary.accuracy.valid_rate, 0.1) &&
+              close(summary.accuracy.accurate_rates[0], 0.1) &&
+              summary.accuracy.mean_corner_error.has_value() &&
+              close(*summary.accuracy.mean_corner_error, 0.5),
+          "query summary homography rates are incorrect");
+    checkThrows([] { image_search::summarize_queries({}); },
+                "query summary accepted no queries");
+}
+
 // Test the local-feature extraction status and the stored image size.
 void testLocalFeatures() {
     const auto result = image_search::extract_sift_features(
@@ -1367,6 +1406,7 @@ int main() {
         testRelevantPairEvaluation();
         testQueryEvaluation();
         testHomographyAccuracy();
+        testQuerySummary();
         testVerificationOutput();
         testLocalFeatures();
         testLocalFeatureStore();

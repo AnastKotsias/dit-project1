@@ -24,13 +24,6 @@ void write_verification_results(const std::string& output_path,
     if(!output)
         throw std::runtime_error("could not open output file: " + output_path);
 
-    // sums over all queries, and every relevant pair for the rates
-    RetrievalMetrics before_sum;
-    RetrievalMetrics after_sum;
-    RetrievalMetrics match_count_sum;
-    double candidate_time = 0.0, verification_time = 0.0, total_time = 0.0;
-    std::vector<PairEvaluation> pairs;
-
     output << std::fixed << std::setprecision(4);
     output << method_name << "\n";
     for(const auto& query : queries) {
@@ -70,50 +63,31 @@ void write_verification_results(const std::string& output_path,
                << "MatchCount-Recall@5: " << query.match_count_metrics.recall_5 << "\n"
                << "MatchCount-Recall@10: " << query.match_count_metrics.recall_10 << "\n"
                << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n\n";
-
-        before_sum.recall_5 += query.before_metrics.recall_5;
-        before_sum.recall_10 += query.before_metrics.recall_10;
-        before_sum.ap_10 += query.before_metrics.ap_10;
-        after_sum.recall_5 += query.after_metrics.recall_5;
-        after_sum.recall_10 += query.after_metrics.recall_10;
-        after_sum.ap_10 += query.after_metrics.ap_10;
-        match_count_sum.recall_5 += query.match_count_metrics.recall_5;
-        match_count_sum.recall_10 += query.match_count_metrics.recall_10;
-        match_count_sum.ap_10 += query.match_count_metrics.ap_10;
-        candidate_time += query.candidate_time_ms;
-        verification_time += query.verification_time_ms;
-        total_time += query.total_time_ms;
-        pairs.insert(pairs.end(), query.pairs.begin(), query.pairs.end());
     }
 
-    // mAP@10 = 1/|Q| sum AP@10(Q)
-    const double count = static_cast<double>(queries.size());
-    output << "MeanBeforeRecall@5: " << before_sum.recall_5 / count << "\n"
-           << "MeanBeforeRecall@10: " << before_sum.recall_10 / count << "\n"
-           << "MeanBeforeMAP@10: " << before_sum.ap_10 / count << "\n"
-           << "MeanAfterRecall@5: " << after_sum.recall_5 / count << "\n"
-           << "MeanAfterRecall@10: " << after_sum.recall_10 / count << "\n"
-           << "MeanAfterMAP@10: " << after_sum.ap_10 / count << "\n"
-           << "AverageCandidateTimeMs: " << candidate_time / count << "\n"
-           << "AverageVerificationTimeMs: " << verification_time / count << "\n"
-           << "AverageTotalTimeMs: " << total_time / count << "\n";
-
-    // rates over 5 |Q| pairs, mean over valid pairs only
-    const HomographyAccuracy accuracy = summarize_homography_accuracy(pairs);
-    output << "ValidHomographyRate: " << accuracy.valid_rate << "\n"
-           << "AccurateHomographyRate5px: " << accuracy.accurate_rates[2] << "\n"
+    const VerificationSummary summary = summarize_queries(queries);
+    output << "MeanBeforeRecall@5: " << summary.before.recall_5 << "\n"
+           << "MeanBeforeRecall@10: " << summary.before.recall_10 << "\n"
+           << "MeanBeforeMAP@10: " << summary.before.ap_10 << "\n"
+           << "MeanAfterRecall@5: " << summary.after.recall_5 << "\n"
+           << "MeanAfterRecall@10: " << summary.after.recall_10 << "\n"
+           << "MeanAfterMAP@10: " << summary.after.ap_10 << "\n"
+           << "AverageCandidateTimeMs: " << summary.candidate_time_ms << "\n"
+           << "AverageVerificationTimeMs: " << summary.verification_time_ms << "\n"
+           << "AverageTotalTimeMs: " << summary.total_time_ms << "\n"
+           << "ValidHomographyRate: " << summary.accuracy.valid_rate << "\n"
+           << "AccurateHomographyRate5px: " << summary.accuracy.accurate_rates[2] << "\n"
            << "MeanCornerErrorPx: ";
-    if(accuracy.mean_corner_error)
-        output << *accuracy.mean_corner_error << "\n";
+    if(summary.accuracy.mean_corner_error)
+        output << *summary.accuracy.mean_corner_error << "\n";
     else
         output << kNotAvailable << "\n";
-    // 1 and 3 px thresholds of the experimental study
-    output << "AccurateHomographyRate1px: " << accuracy.accurate_rates[0] << "\n"
-           << "AccurateHomographyRate3px: " << accuracy.accurate_rates[1] << "\n"
-           // means of the match-count ranking
-           << "MeanMatchCountRecall@5: " << match_count_sum.recall_5 / count << "\n"
-           << "MeanMatchCountRecall@10: " << match_count_sum.recall_10 / count << "\n"
-           << "MeanMatchCountMAP@10: " << match_count_sum.ap_10 / count << "\n";
+    // 1 and 3 px thresholds, then the match-count ranking
+    output << "AccurateHomographyRate1px: " << summary.accuracy.accurate_rates[0] << "\n"
+           << "AccurateHomographyRate3px: " << summary.accuracy.accurate_rates[1] << "\n"
+           << "MeanMatchCountRecall@5: " << summary.match_count.recall_5 << "\n"
+           << "MeanMatchCountRecall@10: " << summary.match_count.recall_10 << "\n"
+           << "MeanMatchCountMAP@10: " << summary.match_count.ap_10 << "\n";
 }
 
 }  // namespace image_search

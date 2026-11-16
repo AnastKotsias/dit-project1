@@ -174,4 +174,42 @@ HomographyAccuracy summarize_homography_accuracy(
     return result;
 }
 
+VerificationSummary summarize_queries(const std::vector<QueryEvaluation>& queries) {
+    // |Q| is the denominator of every mean
+    if(queries.empty())
+        throw std::invalid_argument("a summary needs at least one query");
+
+    VerificationSummary summary;
+    summary.query_count = queries.size();
+    std::vector<PairEvaluation> pairs;
+    const auto add = [](RetrievalMetrics& sum, const RetrievalMetrics& metrics) {
+        sum.recall_5 += metrics.recall_5;
+        sum.recall_10 += metrics.recall_10;
+        sum.ap_10 += metrics.ap_10;
+    };
+    for(const auto& query : queries) {
+        add(summary.before, query.before_metrics);
+        add(summary.after, query.after_metrics);
+        add(summary.match_count, query.match_count_metrics);
+        summary.candidate_time_ms += query.candidate_time_ms;
+        summary.verification_time_ms += query.verification_time_ms;
+        summary.total_time_ms += query.total_time_ms;
+        pairs.insert(pairs.end(), query.pairs.begin(), query.pairs.end());
+    }
+
+    // sums to means
+    const double count = static_cast<double>(queries.size());
+    for(RetrievalMetrics* metrics : {&summary.before, &summary.after, &summary.match_count}) {
+        metrics->recall_5 /= count;
+        metrics->recall_10 /= count;
+        metrics->ap_10 /= count;
+    }
+    summary.candidate_time_ms /= count;
+    summary.verification_time_ms /= count;
+    summary.total_time_ms /= count;
+    // rates over 5 |Q| pairs, mean over valid pairs only
+    summary.accuracy = summarize_homography_accuracy(pairs);
+    return summary;
+}
+
 }  // namespace image_search
