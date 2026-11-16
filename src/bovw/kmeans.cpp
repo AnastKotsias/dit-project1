@@ -1,4 +1,4 @@
-#include "kmeans.hpp"
+#include "bovw/kmeans.hpp"
 
 #include <algorithm>
 #include <limits>

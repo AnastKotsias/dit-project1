@@ -1,5 +1,5 @@
-#include "image_features.hpp"
-#include "local_features.hpp"
+#include "bovw/image_features.hpp"
+#include "geometry/local_features.hpp"
 
 #include <numeric>
 #include <random>

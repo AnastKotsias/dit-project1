@@ -6,11 +6,11 @@
 #include <filesystem>
 #include <fstream>
 
-#include "dataset.hpp"
-#include "search.hpp"
-#include "experiment.hpp"
-#include "command_line.hpp"
-#include "search_setup.hpp"
+#include "data/dataset.hpp"
+#include "search/search.hpp"
+#include "app/experiment.hpp"
+#include "app/command_line.hpp"
+#include "app/search_setup.hpp"
 
 int main(int argc, char** argv) {
     image_search::SearchArgs args;

@@ -1,9 +1,9 @@
 #ifndef GEOMETRIC_VERIFICATION_HPP
 #define GEOMETRIC_VERIFICATION_HPP
 
-#include "descriptor_matching.hpp"
-#include "homography.hpp"
-#include "search.hpp"
+#include "geometry/descriptor_matching.hpp"
+#include "geometry/homography.hpp"
+#include "search/search.hpp"
 
 #include <cstddef>
 #include <cstdint>

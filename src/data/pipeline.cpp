@@ -1,7 +1,7 @@
-#include "pipeline.hpp"
+#include "data/pipeline.hpp"
 
-#include "image_features.hpp"
-#include "vocabulary.hpp"
+#include "bovw/image_features.hpp"
+#include "bovw/vocabulary.hpp"
 
 #include <algorithm>
 #include <cstddef>

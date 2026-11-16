@@ -4,7 +4,7 @@
 // internal helpers shared by the search methods in src/search/
 // this header is private to the search module and is not part of the public include/ API
 
-#include "search.hpp"
+#include "search/search.hpp"
 
 #include <chrono>
 #include <cstddef>

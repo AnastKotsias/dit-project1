@@ -40,19 +40,19 @@ components without requiring the image data sets.
 
 **OpenCV use.** OpenCV is used only for `cv::imread` and
 `cv::SIFT::detectAndCompute` (in `extract_sift_descriptors`,
-[src/image_features.cpp](src/image_features.cpp)); the descriptors are copied out of the
+[src/bovw/image_features.cpp](src/bovw/image_features.cpp)); the descriptors are copied out of the
 `cv::Mat` immediately. Descriptor storage, sampling, k-means, nearest-center
 assignment and every distance computation are implemented in this project.
 
 **Eigen use.** As the Assignment 2 description allows, Eigen is used only for
 the SVD of the DLT matrix (`Eigen::JacobiSVD` with `ComputeFullV`, in
-`estimate_homography`, [src/homography.cpp](src/homography.cpp)). Building the
+`estimate_homography`, [src/geometry/homography.cpp](src/geometry/homography.cpp)). Building the
 DLT matrix, point normalization, denormalization, the degeneracy and numerical
 checks, descriptor matching and RANSAC are implemented in this project.
 
 **Parallelism.** OpenMP parallelises only the image preprocessing, one image per
 iteration: SIFT extraction of the training images and of the HPatches/MIRFlickr/query
-images with BoVW construction ([src/pipeline.cpp](src/pipeline.cpp)). Images are
+images with BoVW construction ([src/data/pipeline.cpp](src/data/pipeline.cpp)). Images are
 processed in batches of 64 whose results are consumed in input order, so the
 output is identical to a serial run and to any thread count. Sampling, k-means,
 index construction and **every search run on a single thread**, so query times
@@ -166,19 +166,33 @@ of the run made with `-S 500 -seed 1`.
 .
 ├── Makefile, CMakeLists.txt     build ("make" is the entry point)
 ├── split.txt                    train/validation/test split of the 116 sequences
-├── include/                     public headers, one per module
-│   ├── dataset.hpp              ImageRecord, EvaluationDataset, split loading, path construction
-│   ├── image_features.hpp       SIFT extraction interface, descriptor sampling
+├── include/                     public headers, one per module, in the same folders as src/
 │   ├── matrix.hpp               Matrix<T>, a dense row-major matrix (DescriptorMatrix = Matrix<float>)
-│   ├── kmeans.hpp               k-means (k-means++ and Lloyd), used by every clustering step
-│   ├── vocabulary.hpp           visual vocabulary and BoVW histogram
-│   ├── pipeline.hpp             batch extraction of training samples and BoVW vectors
-│   ├── search.hpp               the five search classes, SearchResult, result writer
-│   └── experiment.hpp           ExperimentRunner (validation, test, report)
+│   ├── app/
+│   │   ├── command_line.hpp     options of search and verify and their parsers
+│   │   ├── search_setup.hpp     vocabulary, BoVW database and queries shared by search and verify
+│   │   └── experiment.hpp       ExperimentRunner (validation, test, report)
+│   ├── data/
+│   │   ├── dataset.hpp          ImageRecord, EvaluationDataset, split loading, path construction
+│   │   └── pipeline.hpp         batch extraction of training samples, BoVW vectors and local features
+│   ├── bovw/
+│   │   ├── image_features.hpp   SIFT extraction interface, descriptor sampling
+│   │   ├── kmeans.hpp           k-means (k-means++ and Lloyd), used by every clustering step
+│   │   └── vocabulary.hpp       visual vocabulary and BoVW histogram
+│   ├── search/
+│   │   └── search.hpp           the five search classes, SearchResult, TopC candidates, result writer
+│   ├── geometry/
+│   │   ├── local_features.hpp   SIFT keypoints with their descriptors
+│   │   ├── descriptor_matching.hpp     nearest-neighbour matching with the Lowe ratio test
+│   │   ├── homography.hpp       normalized DLT, degeneracy checks, point projection
+│   │   └── geometric_verification.hpp  RANSAC, candidate verification and reranking
+│   └── evaluation/
+│       ├── geometric_evaluation.hpp    ground truth, corner error, per-query evaluation
+│       └── verification_output.hpp     output file of verify
 ├── src/
-│   ├── main.cpp                 argument parsing/validation and the single-run flow
-│   ├── dataset.cpp, image_features.cpp, kmeans.cpp, vocabulary.cpp, pipeline.cpp
-│   ├── experiment.cpp           experiment mode
+│   ├── main.cpp                 search: a single run or the experiment mode
+│   ├── verify_main.cpp          verify: TopC candidates, geometric verification and reranking
+│   ├── app/, data/, bovw/, geometry/, evaluation/   one .cpp per header above
 │   └── search/
 │       ├── common.hpp/.cpp      private helpers shared by the methods (distances, IVF clustering, result building)
 │       ├── exact.cpp, lsh.cpp, hypercube.cpp, ivfflat.cpp, ivfpq.cpp
@@ -193,7 +207,7 @@ use the pimpl idiom). `main.cpp` only orchestrates and decides the failure
 policy; `pipeline.cpp` and `experiment.cpp` provide reusable operations that
 can be tested independently of the command line. `src/search/common.hpp` is
 not in `include/` because it is internal to the search module. Generated files
-(`build/`, `search`, data sets) are ignored by Git.
+(`build/`, `search`, `verify`, data sets) are ignored by Git.
 
 ## 4. Design and algorithmic decisions
 
@@ -219,7 +233,7 @@ split.txt ─► training images (70 sequences × 6) ─► SIFT (OpenCV) ─►
   database never influence it. At most `S` descriptors per image are drawn with
   a seeded `std::mt19937` (all of them if the image has fewer). The union is
   clustered into `K` centers, shared by every image.
-- Our k-means ([src/kmeans.cpp](src/kmeans.cpp)) uses k-means++ initialisation and Lloyd
+- Our k-means ([src/bovw/kmeans.cpp](src/bovw/kmeans.cpp)) uses k-means++ initialisation and Lloyd
   iterations; an empty cluster is re-seeded with the point farthest from its
   center; distance ties go to the lowest center index. The vocabulary runs at
   most 50 iterations: on the training descriptors this is within 0.1 % of the

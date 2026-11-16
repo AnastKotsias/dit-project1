@@ -1,7 +1,7 @@
 #ifndef LOCAL_FEATURES_HPP
 #define LOCAL_FEATURES_HPP
 
-#include "image_features.hpp"
+#include "bovw/image_features.hpp"
 
 #include <array>
 #include <cstddef>

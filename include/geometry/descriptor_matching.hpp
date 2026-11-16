@@ -1,7 +1,7 @@
 #ifndef DESCRIPTOR_MATCHING_HPP
 #define DESCRIPTOR_MATCHING_HPP
 
-#include "local_features.hpp"
+#include "geometry/local_features.hpp"
 
 #include <cstddef>
 #include <vector>

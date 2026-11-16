@@ -1,8 +1,8 @@
-#include "search_setup.hpp"
+#include "app/search_setup.hpp"
 
-#include "pipeline.hpp"
-#include "search.hpp"
-#include "vocabulary.hpp"
+#include "data/pipeline.hpp"
+#include "search/search.hpp"
+#include "bovw/vocabulary.hpp"
 
 #include <algorithm>
 #include <cmath>

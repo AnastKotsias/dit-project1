@@ -1,8 +1,8 @@
 #ifndef GEOMETRIC_EVALUATION_HPP
 #define GEOMETRIC_EVALUATION_HPP
 
-#include "geometric_verification.hpp"
-#include "homography.hpp"
+#include "geometry/geometric_verification.hpp"
+#include "geometry/homography.hpp"
 
 #include <array>
 #include <cstddef>

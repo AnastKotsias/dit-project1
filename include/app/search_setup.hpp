@@ -1,8 +1,8 @@
 #ifndef SEARCH_SETUP_HPP
 #define SEARCH_SETUP_HPP
 
-#include "command_line.hpp"
-#include "dataset.hpp"
+#include "app/command_line.hpp"
+#include "data/dataset.hpp"
 
 #include <cstddef>
 #include <filesystem>

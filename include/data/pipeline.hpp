@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "dataset.hpp"
-#include "image_features.hpp"
-#include "local_features.hpp"
+#include "data/dataset.hpp"
+#include "bovw/image_features.hpp"
+#include "geometry/local_features.hpp"
 #include "matrix.hpp"
 
 namespace image_search {

@@ -1,7 +1,7 @@
 #ifndef HOMOGRAPHY_HPP
 #define HOMOGRAPHY_HPP
 
-#include "local_features.hpp"
+#include "geometry/local_features.hpp"
 
 #include <array>
 #include <cstddef>

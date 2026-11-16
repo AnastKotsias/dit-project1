@@ -1,5 +1,5 @@
-#include "vocabulary.hpp"
-#include "kmeans.hpp"
+#include "bovw/vocabulary.hpp"
+#include "bovw/kmeans.hpp"
 #include <algorithm>
 #include <stdexcept>
 

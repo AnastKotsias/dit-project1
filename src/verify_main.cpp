@@ -6,13 +6,13 @@
 #include <string>
 #include <vector>
 
-#include "command_line.hpp"
-#include "geometric_evaluation.hpp"
-#include "geometric_verification.hpp"
-#include "pipeline.hpp"
-#include "search.hpp"
-#include "search_setup.hpp"
-#include "verification_output.hpp"
+#include "app/command_line.hpp"
+#include "evaluation/geometric_evaluation.hpp"
+#include "geometry/geometric_verification.hpp"
+#include "data/pipeline.hpp"
+#include "search/search.hpp"
+#include "app/search_setup.hpp"
+#include "evaluation/verification_output.hpp"
 
 namespace {
 

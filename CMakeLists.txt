@@ -20,19 +20,13 @@ find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
 # everything except the program entry points, shared by search, verify and the tests
 set(IMAGE_SEARCH_SOURCES
-    src/command_line.cpp
-    src/search_setup.cpp
-    src/dataset.cpp
-    src/image_features.cpp
-    src/local_features.cpp
-    src/descriptor_matching.cpp
-    src/homography.cpp
-    src/geometric_verification.cpp
-    src/geometric_evaluation.cpp
-    src/verification_output.cpp
-    src/kmeans.cpp
-    src/vocabulary.cpp
-    src/pipeline.cpp
+    src/app/command_line.cpp
+    src/app/search_setup.cpp
+    src/data/dataset.cpp
+    src/data/pipeline.cpp
+    src/bovw/image_features.cpp
+    src/bovw/kmeans.cpp
+    src/bovw/vocabulary.cpp
     src/search/common.cpp
     src/search/exact.cpp
     src/search/lsh.cpp
@@ -40,13 +34,19 @@ set(IMAGE_SEARCH_SOURCES
     src/search/ivfflat.cpp
     src/search/ivfpq.cpp
     src/search/output.cpp
+    src/geometry/local_features.cpp
+    src/geometry/descriptor_matching.cpp
+    src/geometry/homography.cpp
+    src/geometry/geometric_verification.cpp
+    src/evaluation/geometric_evaluation.cpp
+    src/evaluation/verification_output.cpp
 )
 
 if(BUILD_SEARCH_APP)
     # OpenCV only reads images (imgcodecs) and computes SIFT descriptors (features2d)
     find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
 
-    add_executable(search src/main.cpp src/experiment.cpp ${IMAGE_SEARCH_SOURCES})
+    add_executable(search src/main.cpp src/app/experiment.cpp ${IMAGE_SEARCH_SOURCES})
 
     # assignment 2: TopC candidates of the same index, SIFT matching, RANSAC and reranking
     add_executable(verify src/verify_main.cpp ${IMAGE_SEARCH_SOURCES})

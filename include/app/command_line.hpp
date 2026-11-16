@@ -1,7 +1,7 @@
 #ifndef COMMAND_LINE_HPP
 #define COMMAND_LINE_HPP
 
-#include "geometric_verification.hpp"
+#include "geometry/geometric_verification.hpp"
 
 #include <cstddef>
 #include <string>
