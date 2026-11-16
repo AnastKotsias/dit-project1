@@ -25,6 +25,7 @@ if(BUILD_SEARCH_APP)
     add_executable(search
         src/main.cpp
         src/command_line.cpp
+        src/search_setup.cpp
         src/dataset.cpp
         src/image_features.cpp
         src/local_features.cpp
@@ -62,6 +63,7 @@ if(BUILD_TESTING)
     add_executable(image_search_tests
         tests/unit_tests.cpp
         src/command_line.cpp
+        src/search_setup.cpp
         src/dataset.cpp
         src/image_features.cpp
         src/local_features.cpp

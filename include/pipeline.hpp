@@ -52,6 +52,8 @@ struct BowVectorResult {
     std::vector<std::string> identifiers;
     // images skipped because their descriptors could not be extracted
     std::vector<FailedImageRecord> failed_records;
+    // position in the input records of each successful image, e.g. for its file path
+    std::vector<std::size_t> record_indices;
 };
 
 // converts the records, in order, to BoVW vectors, skipping the images that fail

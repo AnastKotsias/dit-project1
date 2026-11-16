@@ -108,7 +108,7 @@ BowVectorResult extract_bow_vectors(
     std::size_t successful_limit) {
     auto sets = extract_bow_vector_sets(records, {vocabulary}, successful_limit);
     return {std::move(sets.vectors.front()), std::move(sets.identifiers),
-            std::move(sets.failed_records)};
+            std::move(sets.failed_records), std::move(sets.record_indices)};
 }
 
 MultiBowVectorResult extract_bow_vector_sets(

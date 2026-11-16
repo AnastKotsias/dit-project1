@@ -785,6 +785,41 @@ void testLocalFeatureStore() {
         std::filesystem::remove(path);
 }
 
+// Test that BoVW extraction reports the input record of every successful image
+void testBowRecordIndices() {
+    const auto directory = std::filesystem::temp_directory_path();
+    const auto board_path = directory / "image_search_bow_board.pgm";
+    const auto blank_path = directory / "image_search_bow_blank.pgm";
+    cv::Mat board(120, 160, CV_8UC1);
+    for(int row = 0; row < board.rows; ++row) {
+        for(int column = 0; column < board.cols; ++column)
+            board.at<unsigned char>(row, column) =
+                ((row / 20 + column / 20) % 2 == 0) ? 30 : 220;
+    }
+    check(cv::imwrite(board_path.string(), board) &&
+              cv::imwrite(blank_path.string(), cv::Mat(48, 64, CV_8UC1, cv::Scalar(128))),
+          "could not write the BoVW test images");
+
+    // blank and missing images fail, the boards succeed
+    const std::vector<image_search::ImageRecord> records = {
+        {blank_path.string(), "blank"}, {board_path.string(), "first"},
+        {(directory / "image_search_bow_missing.pgm").string(), "missing"},
+        {board_path.string(), "second"}};
+    const image_search::DescriptorMatrix vocabulary(2, 128);
+    const auto all = image_search::extract_bow_vectors(records, vocabulary);
+    check(all.record_indices == std::vector<std::size_t>{1, 3} &&
+              all.identifiers == std::vector<std::string>{"first", "second"} &&
+              all.failed_records.size() == 2,
+          "BoVW extraction did not report the records of the successful images");
+    // first D = 1 usable image
+    const auto limited = image_search::extract_bow_vectors(records, vocabulary, 1);
+    check(limited.record_indices == std::vector<std::size_t>{1},
+          "BoVW extraction with a limit reported the wrong record");
+
+    std::filesystem::remove(board_path);
+    std::filesystem::remove(blank_path);
+}
+
 // Test strict Lowe-ratio matching, tie handling and insufficient candidates.
 void testDescriptorMatching() {
     image_search::LocalFeatureSet query;
@@ -1219,6 +1254,7 @@ int main() {
         testVerificationOutput();
         testLocalFeatures();
         testLocalFeatureStore();
+        testBowRecordIndices();
         testDescriptorMatching();
         testHomographyProjection();
         testHomographyEstimation();
