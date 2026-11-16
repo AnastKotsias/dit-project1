@@ -8,24 +8,39 @@
 namespace image_search {
 namespace {
 
+constexpr std::size_t kSiftDimension = 128;
+// dimensions summed between two early-exit checks
+constexpr std::size_t kDistanceBlock = 32;
+
 void validate_features(const LocalFeatureSet& features, const char* name) {
     // point coordinates and descriptor rows must be aligned
     if(features.points.size() != features.descriptors.rows)
         throw std::invalid_argument(std::string(name) +
                                     " points and descriptors are misaligned");
-    if(features.descriptors.cols != 128)
+    if(features.descriptors.cols != kSiftDimension)
         throw std::invalid_argument(std::string(name) +
                                     " descriptors must have 128 columns");
 }
 
-double squared_distance(const float* first, const float* second,
-                        std::size_t dimension) {
-    // squared distances preserve Lowe ordering
-    // square root only for accepted matches
+// squared distance, or a partial sum once it reaches bound
+// squared distances preserve Lowe ordering, square root only for accepted matches
+double squared_distance(const float* first, const float* second, double bound) {
     double result = 0.0;
-    for(std::size_t i = 0 ; i < dimension ; ++i) {
-        const double difference = static_cast<double>(first[i]) - second[i];
-        result += difference * difference;
+    for(std::size_t start = 0 ; start < kSiftDimension ; start += kDistanceBlock) {
+        // four independent sums, so the additions do not wait on each other
+        double sums[4] = {0.0, 0.0, 0.0, 0.0};
+        for(std::size_t i = start ; i < start + kDistanceBlock ; i += 4) {
+            for(std::size_t lane = 0 ; lane < 4 ; ++lane) {
+                const double difference =
+                    static_cast<double>(first[i + lane]) - second[i + lane];
+                sums[lane] += difference * difference;
+            }
+        }
+        // SIFT values are integers 0..255, so the sum is exact in any order
+        result += (sums[0] + sums[1]) + (sums[2] + sums[3]);
+        // terms are nonnegative: partial >= bound fails D < best and D < second_best like the full D
+        if(result >= bound)
+            return result;
     }
     return result;
 }
@@ -57,10 +72,10 @@ std::vector<DescriptorMatch> match_descriptors(
 
         for(std::size_t candidate_index = 0 ;
             candidate_index < candidate.descriptors.rows ; ++candidate_index) {
+            // only distances below second_best change best or second_best
             const double distance = squared_distance(
                 query.descriptors.row(query_index),
-                candidate.descriptors.row(candidate_index),
-                query.descriptors.cols);
+                candidate.descriptors.row(candidate_index), second_best);
             // strict comparisons keep the lowest index on ties
             if(distance < best) {
                 second_best = best;

@@ -19,6 +19,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -872,6 +873,87 @@ void testDescriptorMatching() {
           "descriptor matching rejected a match below the Lowe ratio");
 }
 
+// Test the early-exit distance against full distances on SIFT-like integer descriptors.
+void testDescriptorMatchingReference() {
+    // sparse integers 0..255 like OpenCV SIFT, spread distances make d1/d2 close to rho
+    std::mt19937 rng(7);
+    std::uniform_int_distribution<int> value(0, 255);
+    std::bernoulli_distribution nonzero(0.3);
+    const auto random_features = [&](std::size_t count) {
+        image_search::LocalFeatureSet features;
+        features.descriptors = image_search::DescriptorMatrix(count, 128);
+        for(std::size_t row = 0; row < count; ++row) {
+            features.points.push_back({static_cast<double>(row), 0.0});
+            for(std::size_t column = 0; column < 128; ++column)
+                features.descriptors.row(row)[column] =
+                    nonzero(rng) ? static_cast<float>(value(rng)) : 0.0F;
+        }
+        return features;
+    };
+    auto query = random_features(200);
+    auto candidate = random_features(150);
+    // near copies pass the ratio test, a duplicated row is a tie, an exact copy has d1 = 0
+    for(std::size_t row = 0; row < 20; ++row) {
+        for(std::size_t column = 0; column < 128; ++column)
+            candidate.descriptors.row(2 * row)[column] =
+                query.descriptors.row(row)[column] + (column == row ? 3.0F : 0.0F);
+    }
+    for(std::size_t column = 0; column < 128; ++column) {
+        candidate.descriptors.row(41)[column] = candidate.descriptors.row(40)[column];
+        candidate.descriptors.row(100)[column] = query.descriptors.row(30)[column];
+    }
+    // D1 = 128*5^2 then D2 = 128*6^2, d1/d2 = 0.833 < rho only if D2 is summed past D1
+    for(std::size_t k = 0; k < 10; ++k) {
+        for(std::size_t column = 0; column < 128; ++column) {
+            const float q_value = query.descriptors.row(150 + k)[column];
+            const float sign = q_value > 127.0F ? -1.0F : 1.0F;
+            candidate.descriptors.row(120 + 2 * k)[column] = q_value + 5.0F * sign;
+            candidate.descriptors.row(121 + 2 * k)[column] = q_value + 6.0F * sign;
+        }
+    }
+
+    // full sums, first lowest index, strict d1 < rho d2 on squared distances
+    const double rho = 0.9;
+    std::vector<image_search::DescriptorMatch> expected;
+    for(std::size_t q = 0; q < query.descriptors.rows; ++q) {
+        double best = std::numeric_limits<double>::infinity();
+        double second = std::numeric_limits<double>::infinity();
+        std::size_t best_index = 0;
+        for(std::size_t c = 0; c < candidate.descriptors.rows; ++c) {
+            double distance = 0.0;
+            for(std::size_t column = 0; column < 128; ++column) {
+                const double difference =
+                    static_cast<double>(query.descriptors.row(q)[column]) -
+                    candidate.descriptors.row(c)[column];
+                distance += difference * difference;
+            }
+            if(distance < best) {
+                second = best;
+                best = distance;
+                best_index = c;
+            } else if(distance < second) {
+                second = distance;
+            }
+        }
+        if(second > 0.0 && best < rho * rho * second)
+            expected.push_back({query.points[q], candidate.points[best_index],
+                                std::sqrt(best), q, best_index});
+    }
+
+    const auto matches = image_search::match_descriptors(query, candidate, rho);
+    std::size_t controlled = 0;
+    for(const auto& match : expected)
+        if(match.query_descriptor_index >= 150 && match.query_descriptor_index < 160)
+            ++controlled;
+    bool same = matches.size() == expected.size() && expected.size() >= 30 && controlled == 10;
+    for(std::size_t i = 0; same && i < matches.size(); ++i) {
+        same = matches[i].query_descriptor_index == expected[i].query_descriptor_index &&
+               matches[i].candidate_descriptor_index == expected[i].candidate_descriptor_index &&
+               matches[i].descriptor_distance == expected[i].descriptor_distance;
+    }
+    check(same, "early-exit descriptor matching differs from the full distances");
+}
+
 // Test homography projection and invalid denominator handling.
 void testHomographyProjection() {
     const image_search::Matrix3 translation = {
@@ -1256,6 +1338,7 @@ int main() {
         testLocalFeatureStore();
         testBowRecordIndices();
         testDescriptorMatching();
+        testDescriptorMatchingReference();
         testHomographyProjection();
         testHomographyEstimation();
         testHomographyRansac();
