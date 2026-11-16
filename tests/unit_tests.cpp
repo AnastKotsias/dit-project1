@@ -1,3 +1,4 @@
+#include "command_line.hpp"
 #include "dataset.hpp"
 #include "descriptor_matching.hpp"
 #include "geometric_evaluation.hpp"
@@ -204,6 +205,50 @@ void testRetrievalMetrics() {
     const auto none = image_search::computeRetrievalMetrics({}, "v_a");
     check(none.recall_5 == 0.0 && none.recall_10 == 0.0 && none.ap_10 == 0.0,
           "retrieval metrics of an empty ranking are not zero");
+}
+
+// Test the search command line: defaults, method options and rejected input
+void testSearchArgs() {
+    // existing directories for -hp and -mir
+    const std::string directory = std::filesystem::temp_directory_path().string();
+    const std::vector<std::string> base = {"-hp", directory, "-mir", directory,
+                                           "-split", "split.txt", "-vocab", "256"};
+    const auto with = [&](const std::vector<std::string>& extra) {
+        std::vector<std::string> arguments = base;
+        arguments.insert(arguments.end(), extra.begin(), extra.end());
+        return arguments;
+    };
+
+    const auto exact = image_search::parse_search_args(with({"-exact"}));
+    check(exact.method == "exact" && exact.vocab == 256 && exact.s_max == 500 &&
+              exact.d_mir == 1000 && exact.set_type == "validation" &&
+              exact.out_file == "output.txt" && exact.seed == 1,
+          "search arguments did not keep the defaults");
+    // -M defaults to 16 for IVFPQ, -kclusters stays unset
+    const auto ivfpq = image_search::parse_search_args(with({"-ivfpq", "-nprobe", "3"}));
+    check(ivfpq.m_param == 16 && ivfpq.ivf_nprobe == 3 && ivfpq.ivf_kclusters == -1,
+          "IVFPQ arguments are incorrect");
+
+    const std::vector<std::vector<std::string>> invalid = {
+        with({}),                                // no method
+        with({"-exact", "-lsh"}),                // two methods
+        with({"-exact", "-vocab", "128"}),       // duplicate option
+        with({"-exact", "-unknown", "1"}),       // unknown option
+        with({"-exact", "-k", "4"}),             // option of another method
+        with({"-exact", "-D", "2000"}),          // D not in {1000, 5000, 10000, 25000}
+        with({"-exact", "-S", "50x"}),           // trailing characters
+        with({"-lsh", "-w", "nan"}),             // non-finite width
+        with({"-ivfpq", "-M", "7"}),             // 256 not divisible by 7
+        with({"-exact", "-set"}),                // missing value
+        {"-hp", directory, "-mir", directory, "-split", "split.txt", "-exact"}};  // no -vocab
+    for(const auto& arguments : invalid)
+        checkThrows([&] { image_search::parse_search_args(arguments); },
+                    "invalid search arguments were accepted");
+    checkThrows([&] {
+        image_search::parse_search_args({"-hp", directory + "/image_search_missing", "-mir",
+                                         directory, "-split", "split.txt", "-vocab", "256",
+                                         "-exact"});
+    }, "search arguments accepted a missing -hp directory");
 }
 
 // Test TopC retrieval of the approximate methods
@@ -1108,6 +1153,7 @@ int main() {
         testKmeans();
         testExactSearch();
         testRetrievalMetrics();
+        testSearchArgs();
         testCandidateRetrieval();
         testDatasetPaths();
         testGroundTruthHomography();
