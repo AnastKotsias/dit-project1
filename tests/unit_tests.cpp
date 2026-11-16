@@ -249,6 +249,46 @@ void testGroundTruthHomography() {
         std::filesystem::remove(path);
 }
 
+// Test the corners a_1, ..., a_4 and the corner error of an estimated homography
+void testCornerError() {
+    const std::array<image_search::Point2, 4> corners = {
+        {{0.0, 0.0}, {159.0, 0.0}, {159.0, 119.0}, {0.0, 119.0}}};
+    check(image_search::image_corners(160, 120) == corners,
+          "image corners are not the corner pixel centers");
+    checkThrows([] { image_search::image_corners(0, 120); },
+                "image corners accepted an empty image");
+
+    const image_search::Matrix3 identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    const image_search::Matrix3 translation = {1, 0, 20, 0, 1, 10, 0, 0, 1};
+    // H = H_GT, and lambda H ~ H gives the same projections
+    const image_search::Matrix3 scaled = {2, 0, 40, 0, 2, 20, 0, 0, 2};
+    const auto exact = image_search::corner_error(translation, translation, 160, 120);
+    const auto rescaled = image_search::corner_error(scaled, translation, 160, 120);
+    check(exact.has_value() && std::abs(*exact) < 1e-12 &&
+              rescaled.has_value() && std::abs(*rescaled) < 1e-12,
+          "corner error is not zero for the ground truth homography");
+
+    // every corner off by (20, 10)
+    const auto shifted = image_search::corner_error(identity, translation, 160, 120);
+    check(shifted.has_value() && std::abs(*shifted - std::sqrt(500.0)) < 1e-12,
+          "corner error of a missing translation is incorrect");
+
+    // H_GT = 2 I on a 3 x 2 image: corner errors 0, 2, sqrt(5), 1
+    const image_search::Matrix3 doubling = {2, 0, 0, 0, 2, 0, 0, 0, 1};
+    const auto mean = image_search::corner_error(identity, doubling, 3, 2);
+    check(mean.has_value() &&
+              std::abs(*mean - (0.0 + 2.0 + std::sqrt(5.0) + 1.0) / 4.0) < 1e-12,
+          "corner error is not the mean over the four corners");
+
+    // c = x is zero at corner (0, 0): no valid estimate
+    const image_search::Matrix3 at_infinity = {1, 0, 0, 0, 1, 0, 1, 0, 0};
+    check(!image_search::corner_error(at_infinity, translation, 160, 120).has_value(),
+          "corner error accepted a corner projected to infinity");
+    checkThrows([&] {
+        image_search::corner_error(identity, at_infinity, 160, 120);
+    }, "corner error accepted a ground truth corner at infinity");
+}
+
 // Test the local-feature extraction status and the stored image size.
 void testLocalFeatures() {
     const auto result = image_search::extract_sift_features(
@@ -772,6 +812,7 @@ int main() {
         testCandidateRetrieval();
         testDatasetPaths();
         testGroundTruthHomography();
+        testCornerError();
         testLocalFeatures();
         testLocalFeatureStore();
         testDescriptorMatching();
