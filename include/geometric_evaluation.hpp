@@ -57,6 +57,35 @@ std::array<PairEvaluation, 5> evaluate_relevant_pairs(
     const std::string& hp_dir, const std::string& sequence,
     std::size_t query_width, std::size_t query_height);
 
+// one query Q = I1 before and after geometric reranking
+struct QueryEvaluation {
+    // sequence of Q, also its output identifier
+    std::string sequence;
+    // |TopC(Q)|, fewer than C for some ANN methods
+    std::size_t candidate_count = 0;
+    // first 10 of TopC(Q), original order
+    std::vector<std::string> before_ids;
+    // first 10 after reranking, with inliers and median error
+    std::vector<CandidateVerification> after;
+    RetrievalMetrics before_metrics;
+    RetrievalMetrics after_metrics;
+    // T_total = T_candidates + T_verify
+    double candidate_time_ms = 0.0;
+    double verification_time_ms = 0.0;
+    double total_time_ms = 0.0;
+    // the 5 relevant pairs (I1, Ij), from all C candidates
+    std::array<PairEvaluation, 5> pairs;
+};
+
+// candidates: TopC(Q) with T_candidates
+// verification: the same candidates reranked, with T_verify
+// throws if verification does not hold every TopC candidate
+QueryEvaluation evaluate_query(
+    const CandidateSearchResult& candidates,
+    const VerificationResult& verification,
+    const std::string& hp_dir, const std::string& sequence,
+    std::size_t query_width, std::size_t query_height);
+
 // accurate estimate: valid with E_corner < 1, 3 or 5 px
 constexpr std::array<double, 3> kCornerErrorThresholds = {1.0, 3.0, 5.0};
 

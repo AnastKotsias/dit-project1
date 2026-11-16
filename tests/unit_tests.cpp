@@ -381,6 +381,96 @@ void testRelevantPairEvaluation() {
     std::filesystem::remove_all(hp_dir);
 }
 
+// Test the before and after rankings, metrics, times and pairs of one query
+void testQueryEvaluation() {
+    const auto hp_dir = std::filesystem::temp_directory_path() / "image_search_hp_query";
+    std::filesystem::create_directories(hp_dir / "v_q");
+    for(const std::string name : {"H_1_2", "H_1_3"})
+        writeTemporaryFile("image_search_hp_query/v_q/" + name, "1 0 20\n0 1 10\n0 0 1\n");
+
+    const image_search::Matrix3 translation = {1, 0, 20, 0, 1, 10, 0, 0, 1};
+    const image_search::Matrix3 identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    // zero inliers: RANSAC failure
+    const auto verified = [](std::size_t rank, const std::string& id, std::size_t inliers,
+                             const image_search::Matrix3& matrix) {
+        image_search::CandidateVerification verification;
+        verification.candidate = {rank, rank, id};
+        verification.homography.valid = inliers > 0;
+        verification.homography.matrix = matrix;
+        verification.homography.inlier_indices.resize(inliers);
+        if(inliers > 0)
+            verification.homography.median_error = 1.0;
+        return verification;
+    };
+
+    // TopC, C = 12: v_q/2 at rank 2, v_q/3 at rank 11
+    image_search::CandidateSearchResult candidates;
+    candidates.query_time_ms = 2.0;
+    std::vector<image_search::CandidateVerification> verifications;
+    for(std::size_t rank = 0; rank < 12; ++rank) {
+        std::string id = "im" + std::to_string(rank) + ".jpg";
+        std::size_t inliers = 0;
+        image_search::Matrix3 matrix = identity;
+        if(rank == 1) {
+            id = "v_q/2";
+            inliers = 30;
+            matrix = translation;
+        } else if(rank == 10) {
+            id = "v_q/3";
+            inliers = 20;
+        }
+        candidates.candidates.push_back({rank, rank, id});
+        verifications.push_back(verified(rank, id, inliers, matrix));
+    }
+    image_search::VerificationResult verification;
+    verification.ranking = image_search::rerank_candidates(verifications);
+    verification.verification_time_ms = 3.5;
+
+    const auto query = image_search::evaluate_query(
+        candidates, verification, hp_dir.string(), "v_q", 160, 120);
+    check(query.sequence == "v_q" && query.candidate_count == 12 &&
+              query.before_ids.size() == 10 && query.after.size() == 10,
+          "query evaluation did not keep the first 10 of TopC");
+    check(query.before_ids[1] == "v_q/2" && query.after[0].candidate.id == "v_q/2" &&
+              query.after[1].candidate.id == "v_q/3",
+          "query evaluation did not keep both rankings");
+    // before: relevant at rank 2; after: ranks 1 and 2
+    check(std::abs(query.before_metrics.recall_10 - 0.2) < 1e-12 &&
+              std::abs(query.before_metrics.ap_10 - 0.1) < 1e-12 &&
+              std::abs(query.after_metrics.recall_5 - 0.4) < 1e-12 &&
+              std::abs(query.after_metrics.ap_10 - 0.4) < 1e-12,
+          "query evaluation metrics are incorrect");
+    check(query.candidate_time_ms == 2.0 && query.verification_time_ms == 3.5 &&
+              query.total_time_ms == 5.5,
+          "query total time is not T_candidates + T_verify");
+    // rank 11 of TopC still evaluated
+    check(query.pairs[0].corner_error.has_value() &&
+              std::abs(*query.pairs[0].corner_error) < 1e-12 &&
+              query.pairs[1].corner_error.has_value() &&
+              std::abs(*query.pairs[1].corner_error - std::sqrt(500.0)) < 1e-12 &&
+              !query.pairs[2].retrieved,
+          "query evaluation did not evaluate relevant pairs below rank 10");
+
+    // fewer than 10 candidates: all of them shown
+    image_search::CandidateSearchResult few;
+    few.candidates.assign(candidates.candidates.begin(), candidates.candidates.begin() + 3);
+    image_search::VerificationResult few_verified;
+    few_verified.ranking = {verified(0, "im0.jpg", 0, identity),
+                            verified(1, "im1.jpg", 0, identity),
+                            verified(2, "im2.jpg", 0, identity)};
+    const auto short_query = image_search::evaluate_query(
+        few, few_verified, hp_dir.string(), "v_q", 160, 120);
+    check(short_query.before_ids.size() == 3 && short_query.after.size() == 3,
+          "query evaluation padded a short TopC");
+
+    // verification must cover every candidate
+    few_verified.ranking.pop_back();
+    checkThrows([&] {
+        image_search::evaluate_query(few, few_verified, hp_dir.string(), "v_q", 160, 120);
+    }, "query evaluation accepted a verification of fewer candidates");
+    std::filesystem::remove_all(hp_dir);
+}
+
 // Test the valid and accurate rates and the mean corner error over all relevant pairs
 void testHomographyAccuracy() {
     const auto pair = [](bool retrieved, std::optional<double> error) {
@@ -945,6 +1035,7 @@ int main() {
         testGroundTruthHomography();
         testCornerError();
         testRelevantPairEvaluation();
+        testQueryEvaluation();
         testHomographyAccuracy();
         testLocalFeatures();
         testLocalFeatureStore();

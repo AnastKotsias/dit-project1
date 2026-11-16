@@ -100,6 +100,41 @@ std::array<PairEvaluation, 5> evaluate_relevant_pairs(
     return pairs;
 }
 
+QueryEvaluation evaluate_query(
+    const CandidateSearchResult& candidates,
+    const VerificationResult& verification,
+    const std::string& hp_dir, const std::string& sequence,
+    std::size_t query_width, std::size_t query_height) {
+    // reranking only reorders TopC(Q)
+    if(verification.ranking.size() != candidates.candidates.size())
+        throw std::invalid_argument("verification does not hold every TopC candidate");
+
+    QueryEvaluation result;
+    result.sequence = sequence;
+    result.candidate_count = candidates.candidates.size();
+    // first 10, or all of them when fewer
+    const std::size_t shown = std::min<std::size_t>(result.candidate_count, 10);
+    std::vector<std::string> after_ids;
+    for(std::size_t rank = 0; rank < shown; ++rank) {
+        result.before_ids.push_back(candidates.candidates[rank].id);
+        result.after.push_back(verification.ranking[rank]);
+        after_ids.push_back(verification.ranking[rank].candidate.id);
+    }
+    // same Recall/AP definitions before and after
+    result.before_metrics = computeRetrievalMetrics(result.before_ids, sequence);
+    result.after_metrics = computeRetrievalMetrics(after_ids, sequence);
+
+    // T_total(Q) = T_candidates(Q) + T_verify(Q)
+    result.candidate_time_ms = candidates.query_time_ms;
+    result.verification_time_ms = verification.verification_time_ms;
+    result.total_time_ms = result.candidate_time_ms + result.verification_time_ms;
+
+    // all C candidates: a relevant Ij may lie below rank 10
+    result.pairs = evaluate_relevant_pairs(verification.ranking, hp_dir, sequence,
+                                           query_width, query_height);
+    return result;
+}
+
 HomographyAccuracy summarize_homography_accuracy(
     const std::vector<PairEvaluation>& pairs) {
     // denominator of both rates
