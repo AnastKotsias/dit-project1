@@ -178,37 +178,14 @@ SearchResult buildRankedResult(const std::vector<std::string>& ids, const std::v
         if(index < ids.size() && seen.insert(index).second)
             top.push_back(ids[index]);
     }
-    const int limit = static_cast<int>(top.size());
 
     // timing stops once the top-10 identifiers are available, the metrics are not part of the query time
     const auto end = std::chrono::steady_clock::now();
     const double elapsed = std::chrono::duration<double, std::milli>(
         end - start).count();
 
-    // the relevant images of a query are images 2 to 6 of its own sequence
-    std::set<std::string> relevant;
-    for(int i = 2; i <= 6; ++i) {
-        relevant.insert(sequenceId + "/" + std::to_string(i));
-    }
-
-    // relevant hits in the top 5 and top 10, and hits so far for the average precision
-    int matches5 = 0;
-    int matches10 = 0;
-    double apSum = 0.0;
-    int found = 0;
-    for(int i = 0; i < limit; ++i) {
-        // ranks are 1-based, so position i has rank i + 1
-        if(relevant.count(top[i]) != 0) {
-            if(i < 5) ++matches5;
-            ++matches10;
-            ++found;
-            // precision at this rank, hits so far divided by rank
-            apSum += static_cast<double>(found) / static_cast<double>(i + 1);
-        }
-    }
-
-    // recall and AP both divide by the 5 relevant images
-    return {queryId, top, matches5 / 5.0, matches10 / 5.0, apSum / 5.0, elapsed, examined};
+    const RetrievalMetrics metrics = computeRetrievalMetrics(top, sequenceId);
+    return {queryId, top, metrics.recall_5, metrics.recall_10, metrics.ap_10, elapsed, examined};
 }
 
 DatabaseIndex::DatabaseIndex(const std::vector<Vector>& values, const std::vector<std::string>& names)
@@ -237,6 +214,36 @@ DatabaseIndex::DatabaseIndex(const std::vector<Vector>& values, const std::vecto
 
 std::size_t ivfTrainingSampleSize(std::size_t database_size) {
     return static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(database_size))));
+}
+
+RetrievalMetrics computeRetrievalMetrics(const std::vector<std::string>& ranked_ids,
+                                         const std::string& sequence_id) {
+    // the relevant images of a query are images 2 to 6 of its own sequence
+    std::set<std::string> relevant;
+    for(int i = 2; i <= 6; ++i) {
+        relevant.insert(sequence_id + "/" + std::to_string(i));
+    }
+
+    // fewer than 10 ranks: only the available ones
+    const std::size_t limit = std::min<std::size_t>(ranked_ids.size(), 10);
+    // relevant hits in the top 5 and top 10, and hits so far for the average precision
+    int matches5 = 0;
+    int matches10 = 0;
+    double apSum = 0.0;
+    int found = 0;
+    for(std::size_t i = 0; i < limit; ++i) {
+        // ranks are 1-based, so position i has rank i + 1
+        if(relevant.count(ranked_ids[i]) != 0) {
+            if(i < 5) ++matches5;
+            ++matches10;
+            ++found;
+            // precision at this rank, hits so far divided by rank
+            apSum += static_cast<double>(found) / static_cast<double>(i + 1);
+        }
+    }
+
+    // recall and AP both divide by the 5 relevant images
+    return {matches5 / 5.0, matches10 / 5.0, apSum / 5.0};
 }
 
 } // namespace image_search

@@ -56,6 +56,20 @@ struct SearchResult {
     std::size_t candidates_examined = 0;
 };
 
+// retrieval quality of one ranking of a query
+struct RetrievalMetrics {
+    double recall_5 = 0.0;
+    double recall_10 = 0.0;
+    double ap_10 = 0.0;
+};
+
+// Recall@5, Recall@10 and AP@10 of ranked identifiers, rank 1 first
+// relevant images: sequence_id/2 to sequence_id/6
+// only the first 10 count, missing ranks are non-relevant, denominators stay 5
+// used before and after geometric reranking
+RetrievalMetrics computeRetrievalMetrics(const std::vector<std::string>& ranked_ids,
+                                         const std::string& sequence_id);
+
 // number of vectors the IVF k-means is trained on, ceil(sqrt(n)) for a database of n vectors
 // it is also the largest number of IVF clusters that can be formed, larger requests are capped to it
 std::size_t ivfTrainingSampleSize(std::size_t database_size);

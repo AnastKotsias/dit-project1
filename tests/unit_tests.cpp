@@ -171,6 +171,39 @@ void checkCandidateRetrieval(const Index& index, const std::vector<double>& quer
                 name + " accepted zero candidates");
 }
 
+// Test Recall@5, Recall@10 and AP@10 of a ranking before and after reranking
+void testRetrievalMetrics() {
+    const auto close = [](double first, double second) {
+        return std::abs(first - second) < 1e-12;
+    };
+    // relevant at ranks 1, 3, 6, 10; v_b/2 other sequence; rank 11 ignored
+    const std::vector<std::string> before = {
+        "v_a/2", "im1.jpg", "v_a/3", "im2.jpg", "im3.jpg", "v_a/4",
+        "v_b/2", "im4.jpg", "im5.jpg", "v_a/5", "v_a/6"};
+    const auto original = image_search::computeRetrievalMetrics(before, "v_a");
+    // AP@10 = (1/1 + 2/3 + 3/6 + 4/10) / 5
+    check(close(original.recall_5, 0.4) && close(original.recall_10, 0.8) &&
+              close(original.ap_10, (1.0 + 2.0 / 3.0 + 0.5 + 0.4) / 5.0),
+          "retrieval metrics of the original ranking are incorrect");
+
+    // same candidates, relevant first: Recall@10 unchanged, AP@10 = 4/5
+    const std::vector<std::string> after = {
+        "v_a/2", "v_a/3", "v_a/4", "v_a/5", "im1.jpg", "im2.jpg",
+        "im3.jpg", "v_b/2", "im4.jpg", "im5.jpg", "v_a/6"};
+    const auto reranked = image_search::computeRetrievalMetrics(after, "v_a");
+    check(close(reranked.recall_5, 0.8) && close(reranked.recall_10, 0.8) &&
+              close(reranked.ap_10, 0.8),
+          "retrieval metrics of the reranked ranking are incorrect");
+
+    // fewer than 10 ranks: denominators stay 5
+    const auto few = image_search::computeRetrievalMetrics({"im1.jpg", "v_a/2"}, "v_a");
+    check(close(few.recall_5, 0.2) && close(few.recall_10, 0.2) && close(few.ap_10, 0.1),
+          "retrieval metrics of a short ranking are incorrect");
+    const auto none = image_search::computeRetrievalMetrics({}, "v_a");
+    check(none.recall_5 == 0.0 && none.recall_10 == 0.0 && none.ap_10 == 0.0,
+          "retrieval metrics of an empty ranking are not zero");
+}
+
 // Test TopC retrieval of the approximate methods
 void testCandidateRetrieval() {
     // 40 seeded points in 4 dimensions
@@ -906,6 +939,7 @@ int main() {
         testMatrixAndDistance();
         testKmeans();
         testExactSearch();
+        testRetrievalMetrics();
         testCandidateRetrieval();
         testDatasetPaths();
         testGroundTruthHomography();
