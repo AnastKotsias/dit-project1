@@ -16,6 +16,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -345,6 +346,44 @@ void testRelevantPairEvaluation() {
             {verified(0, "v_test/6", true, identity)}, hp_dir.string(), "v_test", 160, 120);
     }, "missing ground truth homography was skipped");
     std::filesystem::remove_all(hp_dir);
+}
+
+// Test the valid and accurate rates and the mean corner error over all relevant pairs
+void testHomographyAccuracy() {
+    const auto pair = [](bool retrieved, std::optional<double> error) {
+        image_search::PairEvaluation evaluation;
+        evaluation.retrieved = retrieved;
+        evaluation.corner_error = error;
+        return evaluation;
+    };
+    // 2 queries, 10 pairs: 4 valid, 1 RANSAC failure, 5 outside TopC
+    std::vector<image_search::PairEvaluation> pairs = {
+        pair(true, 0.5), pair(true, 2.0), pair(true, 4.0), pair(true, 5.0),
+        pair(true, std::nullopt)};
+    for(int i = 0; i < 5; ++i)
+        pairs.push_back(pair(false, std::nullopt));
+
+    const auto accuracy = image_search::summarize_homography_accuracy(pairs);
+    check(std::abs(accuracy.valid_rate - 0.4) < 1e-12,
+          "valid homography rate does not divide by all relevant pairs");
+    // E_corner = 5 is not below 5 px
+    check(std::abs(accuracy.accurate_rates[0] - 0.1) < 1e-12 &&
+              std::abs(accuracy.accurate_rates[1] - 0.2) < 1e-12 &&
+              std::abs(accuracy.accurate_rates[2] - 0.3) < 1e-12,
+          "accurate homography rates at 1, 3, 5 px are incorrect");
+    // (0.5 + 2 + 4 + 5) / 4, invalid pairs excluded
+    check(accuracy.mean_corner_error.has_value() &&
+              std::abs(*accuracy.mean_corner_error - 2.875) < 1e-12,
+          "mean corner error is not over the valid pairs only");
+
+    // no valid estimate: rates 0, mean NA, not 0
+    const auto none = image_search::summarize_homography_accuracy(
+        {pair(true, std::nullopt), pair(false, std::nullopt)});
+    check(none.valid_rate == 0.0 && none.accurate_rates[2] == 0.0 &&
+              !none.mean_corner_error.has_value(),
+          "mean corner error was set without a valid estimate");
+    checkThrows([] { image_search::summarize_homography_accuracy({}); },
+                "homography accuracy accepted no relevant pairs");
 }
 
 // Test the local-feature extraction status and the stored image size.
@@ -872,6 +911,7 @@ int main() {
         testGroundTruthHomography();
         testCornerError();
         testRelevantPairEvaluation();
+        testHomographyAccuracy();
         testLocalFeatures();
         testLocalFeatureStore();
         testDescriptorMatching();

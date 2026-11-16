@@ -100,4 +100,37 @@ std::array<PairEvaluation, 5> evaluate_relevant_pairs(
     return pairs;
 }
 
+HomographyAccuracy summarize_homography_accuracy(
+    const std::vector<PairEvaluation>& pairs) {
+    // denominator of both rates
+    if(pairs.empty())
+        throw std::invalid_argument("homography accuracy needs at least one relevant pair");
+
+    std::size_t valid = 0;
+    std::array<std::size_t, 3> accurate{};
+    double error_sum = 0.0;
+    for(const auto& pair : pairs) {
+        // outside TopC or RANSAC failure: invalid, not accurate
+        if(!pair.corner_error.has_value())
+            continue;
+        ++valid;
+        error_sum += *pair.corner_error;
+        // strict E_corner < threshold
+        for(std::size_t t = 0; t < kCornerErrorThresholds.size(); ++t) {
+            if(*pair.corner_error < kCornerErrorThresholds[t])
+                ++accurate[t];
+        }
+    }
+
+    HomographyAccuracy result;
+    const double total = static_cast<double>(pairs.size());
+    result.valid_rate = static_cast<double>(valid) / total;
+    for(std::size_t t = 0; t < accurate.size(); ++t)
+        result.accurate_rates[t] = static_cast<double>(accurate[t]) / total;
+    // mean over valid pairs only, NA when there are none
+    if(valid > 0)
+        result.mean_corner_error = error_sum / static_cast<double>(valid);
+    return result;
+}
+
 }  // namespace image_search

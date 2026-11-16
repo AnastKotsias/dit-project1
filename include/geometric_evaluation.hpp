@@ -57,6 +57,25 @@ std::array<PairEvaluation, 5> evaluate_relevant_pairs(
     const std::string& hp_dir, const std::string& sequence,
     std::size_t query_width, std::size_t query_height);
 
+// accurate estimate: valid with E_corner < 1, 3 or 5 px
+constexpr std::array<double, 3> kCornerErrorThresholds = {1.0, 3.0, 5.0};
+
+// homography accuracy over the relevant pairs of a set
+struct HomographyAccuracy {
+    // valid pairs / all pairs
+    double valid_rate = 0.0;
+    // accurate pairs / all pairs, one per kCornerErrorThresholds
+    std::array<double, 3> accurate_rates{};
+    // mean E_corner of the valid pairs, nullopt (NA) if none
+    std::optional<double> mean_corner_error;
+};
+
+// pairs: the 5 relevant pairs of every query, 23 * 5 = 115 per split
+// invalid pairs stay in the denominator, out of the mean
+// throws if pairs is empty
+HomographyAccuracy summarize_homography_accuracy(
+    const std::vector<PairEvaluation>& pairs);
+
 }  // namespace image_search
 
 #endif
