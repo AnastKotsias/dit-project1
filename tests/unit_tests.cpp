@@ -1315,6 +1315,27 @@ void testGeometricReranking() {
           "failed candidates did not keep the original order");
 }
 
+// Test the match-count ranking, which ignores the RANSAC result
+void testMatchCountRanking() {
+    // input in original order, match counts 12, 30, 12, 7 and 30
+    std::vector<image_search::CandidateVerification> verifications = {
+        verifiedCandidate(0, 10, 1.0), failedCandidate(1), verifiedCandidate(2, 9, 0.5),
+        verifiedCandidate(3, 7, 2.0), failedCandidate(4)};
+    const std::vector<std::size_t> match_counts = {12, 30, 12, 7, 30};
+    for(std::size_t i = 0; i < verifications.size(); ++i)
+        verifications[i].match_count = match_counts[i];
+
+    // 30 matches first even without a homography, ties by original rank
+    const std::vector<std::size_t> expected = {1, 4, 0, 2, 3};
+    const auto ranked = image_search::rank_by_match_count(verifications);
+    check(ranked.size() == expected.size(),
+          "match-count ranking changed the number of candidates");
+    for(std::size_t position = 0; position < expected.size(); ++position) {
+        check(ranked[position].candidate.original_rank == expected[position],
+              "match-count ranking order is incorrect");
+    }
+}
+
 }
 
 int main() {
@@ -1344,6 +1365,7 @@ int main() {
         testHomographyRansac();
         testCandidateVerification();
         testGeometricReranking();
+        testMatchCountRanking();
         testCandidateListVerification();
     } catch(const std::exception& error) {
         std::cerr << "unit test failure: " << error.what() << '\n';

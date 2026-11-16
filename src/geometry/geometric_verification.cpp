@@ -260,6 +260,20 @@ std::vector<CandidateVerification> rerank_candidates(
     return verifications;
 }
 
+std::vector<CandidateVerification> rank_by_match_count(
+    std::vector<CandidateVerification> verifications) {
+    std::sort(verifications.begin(), verifications.end(),
+              [](const CandidateVerification& first,
+                 const CandidateVerification& second) {
+        // 1st key: Lowe matches descending, a failed RANSAC still counts its matches
+        if(first.match_count != second.match_count)
+            return first.match_count > second.match_count;
+        // 2nd key: original BoVW/ANN order
+        return first.candidate.original_rank < second.candidate.original_rank;
+    });
+    return verifications;
+}
+
 VerificationResult verify_candidates(
     const std::vector<SearchCandidate>& candidates,
     const LocalFeatureSet& query_features,

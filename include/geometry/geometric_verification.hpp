@@ -56,6 +56,11 @@ std::size_t final_inlier_count(const CandidateVerification& verification);
 std::vector<CandidateVerification> rerank_candidates(
     std::vector<CandidateVerification> verifications);
 
+// comparison ranking without RANSAC: more Lowe-accepted matches first,
+// then smaller original rank, the homography is ignored
+std::vector<CandidateVerification> rank_by_match_count(
+    std::vector<CandidateVerification> verifications);
+
 // geometric verification outcome of one query
 struct VerificationResult {
     // every TopC candidate after reranking, the first 10 are returned
