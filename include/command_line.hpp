@@ -1,6 +1,9 @@
 #ifndef COMMAND_LINE_HPP
 #define COMMAND_LINE_HPP
 
+#include "geometric_verification.hpp"
+
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -45,6 +48,24 @@ struct SearchArgs {
 // parses and validates the arguments of search, without the program name
 // throws std::invalid_argument with the error message on invalid input
 SearchArgs parse_search_args(const std::vector<std::string>& arguments);
+
+// command-line options of verify
+struct VerifyArgs {
+    // options of search and of the selected method
+    SearchArgs search;
+    // candidate images C (-C), at least 10
+    std::size_t candidate_count = 50;
+    // Lowe ratio rho (-rho), d1 < rho d2
+    double rho = 0.8;
+    // -tau, -T, -p, -adaptive; seed from -seed
+    RansacConfig ransac;
+};
+
+// parses and validates the arguments of verify, without the program name
+// -C, -rho, -tau, -T, -p, -adaptive here, the rest by parse_search_args
+// -kclusters required for IVFFlat and IVFPQ, no -experiment
+// throws std::invalid_argument with the error message on invalid input
+VerifyArgs parse_verify_args(const std::vector<std::string>& arguments);
 
 }  // namespace image_search
 

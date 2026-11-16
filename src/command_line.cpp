@@ -3,6 +3,7 @@
 #include "search.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <set>
 #include <stdexcept>
@@ -180,6 +181,82 @@ SearchArgs parse_search_args(const std::vector<std::string>& arguments) {
     if(args.method == "ivfpq" && args.vocab % args.m_param != 0)
         throw std::invalid_argument("-vocab must be divisible by -M for IVFPQ");
 
+    return args;
+}
+
+VerifyArgs parse_verify_args(const std::vector<std::string>& arguments) {
+    VerifyArgs args;
+    // verify options seen so far
+    std::set<std::string> parsed_options;
+    // everything else, for parse_search_args
+    std::vector<std::string> search_arguments;
+
+    for(std::size_t i = 0 ; i < arguments.size() ; ++i) {
+        const std::string& arg = arguments[i];
+        // single run per call, no automatic tuning
+        if(arg == "-experiment")
+            throw std::invalid_argument("verify does not accept -experiment");
+
+        const bool is_verify_option = (arg == "-C" || arg == "-rho" || arg == "-tau" ||
+                                       arg == "-T" || arg == "-p" || arg == "-adaptive");
+        if(!is_verify_option) {
+            search_arguments.push_back(arg);
+            const bool is_method = (arg == "-exact" || arg == "-lsh" || arg == "-hypercube" || arg == "-ivfflat" || arg == "-ivfpq");
+            // value kept with its option, e.g. -o -C is a file name
+            if(!is_method && i + 1 < arguments.size())
+                search_arguments.push_back(arguments[++i]);
+            continue;
+        }
+
+        if(parsed_options.count(arg))
+            throw std::invalid_argument("duplicate argument " + arg);
+        parsed_options.insert(arg);
+        if(i + 1 >= arguments.size())
+            throw std::invalid_argument("missing value for argument " + arg);
+        const std::string& value = arguments[++i];
+
+        if(arg == "-C") {
+            // C >= 10: Before/After rankings of 10 images
+            const int count = parse_int(arg, value);
+            if(count < 10)
+                throw std::invalid_argument("-C must be at least 10");
+            args.candidate_count = static_cast<std::size_t>(count);
+        } else if(arg == "-rho") {
+            // 0 < rho < 1, nan fails both comparisons
+            args.rho = parse_double(arg, value);
+            if(!(args.rho > 0.0 && args.rho < 1.0))
+                throw std::invalid_argument("-rho must be strictly between 0 and 1");
+        } else if(arg == "-tau") {
+            // e_i(H) < tau pixels
+            args.ransac.tau = parse_double(arg, value);
+            if(!std::isfinite(args.ransac.tau) || args.ransac.tau <= 0.0)
+                throw std::invalid_argument("-tau must be finite and strictly positive");
+        } else if(arg == "-T") {
+            // Tmax >= 1 trials
+            const int trials = parse_int(arg, value);
+            if(trials <= 0)
+                throw std::invalid_argument("-T must be strictly positive");
+            args.ransac.maximum_trials = static_cast<std::size_t>(trials);
+        } else if(arg == "-p") {
+            // 0 < p < 1, log(1 - p) finite and negative
+            args.ransac.confidence = parse_double(arg, value);
+            if(!(args.ransac.confidence > 0.0 && args.ransac.confidence < 1.0))
+                throw std::invalid_argument("-p must be strictly between 0 and 1");
+        } else {
+            const int adaptive = parse_int(arg, value);
+            if(adaptive != 0 && adaptive != 1)
+                throw std::invalid_argument("-adaptive must be 0 or 1");
+            args.ransac.adaptive = adaptive == 1;
+        }
+    }
+
+    args.search = parse_search_args(search_arguments);
+    // no default cluster count in assignment 2
+    if((args.search.method == "ivfflat" || args.search.method == "ivfpq") &&
+       args.search.ivf_kclusters == -1)
+        throw std::invalid_argument("-kclusters is required for ivfflat and ivfpq");
+    // same seed as the BoVW/ANN stage
+    args.ransac.seed = static_cast<std::uint64_t>(args.search.seed);
     return args;
 }
 

@@ -251,6 +251,60 @@ void testSearchArgs() {
     }, "search arguments accepted a missing -hp directory");
 }
 
+// Test the verify command line: defaults, verification options and rejected input
+void testVerifyArgs() {
+    const std::string directory = std::filesystem::temp_directory_path().string();
+    const std::vector<std::string> base = {"-hp", directory, "-mir", directory,
+                                           "-split", "split.txt", "-vocab", "256"};
+    const auto with = [&](const std::vector<std::string>& extra) {
+        std::vector<std::string> arguments = base;
+        arguments.insert(arguments.end(), extra.begin(), extra.end());
+        return arguments;
+    };
+
+    // defaults of the assignment: C 50, rho 0.8, tau 3, T 2000, p 0.99, adaptive 1
+    const auto defaults = image_search::parse_verify_args(with({"-exact"}));
+    check(defaults.search.method == "exact" && defaults.candidate_count == 50 &&
+              defaults.rho == 0.8 && defaults.ransac.tau == 3.0 &&
+              defaults.ransac.maximum_trials == 2000 && defaults.ransac.confidence == 0.99 &&
+              defaults.ransac.adaptive && defaults.ransac.seed == 1,
+          "verify arguments did not keep the defaults");
+
+    // the example command of the assignment, options mixed with search options
+    const auto example = image_search::parse_verify_args(with({
+        "-set", "validation", "-ivfflat", "-kclusters", "16", "-nprobe", "5", "-C", "20",
+        "-rho", "0.7", "-tau", "5", "-T", "500", "-p", "0.95", "-adaptive", "0",
+        "-seed", "7", "-o", "-C"}));
+    check(example.search.method == "ivfflat" && example.search.ivf_kclusters == 16 &&
+              example.search.ivf_nprobe == 5 && example.candidate_count == 20 &&
+              example.rho == 0.7 && example.ransac.tau == 5.0 &&
+              example.ransac.maximum_trials == 500 && example.ransac.confidence == 0.95 &&
+              !example.ransac.adaptive && example.ransac.seed == 7,
+          "verify arguments were not parsed");
+    // -o -C: a file name, not the -C option
+    check(example.search.out_file == "-C", "verify arguments took an option value as an option");
+
+    const std::vector<std::vector<std::string>> invalid = {
+        with({"-exact", "-C", "9"}),              // C < 10
+        with({"-exact", "-C", "50x"}),            // trailing characters
+        with({"-exact", "-rho", "1"}),            // rho not below 1
+        with({"-exact", "-rho", "nan"}),          // non-finite rho
+        with({"-exact", "-tau", "0"}),            // tau not positive
+        with({"-exact", "-tau", "inf"}),          // non-finite tau
+        with({"-exact", "-T", "0"}),              // no trials
+        with({"-exact", "-p", "1"}),              // log(1 - p) undefined
+        with({"-exact", "-adaptive", "2"}),       // not 0 or 1
+        with({"-exact", "-C", "20", "-C", "30"}), // duplicate option
+        with({"-exact", "-C"}),                   // missing value
+        with({"-ivfflat", "-nprobe", "5"}),       // -kclusters required
+        with({"-ivfpq", "-nprobe", "5"}),         // -kclusters required
+        with({"-experiment"}),                    // no experiment mode
+        with({"-exact", "-k", "4"})};             // search check still applied
+    for(const auto& arguments : invalid)
+        checkThrows([&] { image_search::parse_verify_args(arguments); },
+                    "invalid verify arguments were accepted");
+}
+
 // Test TopC retrieval of the approximate methods
 void testCandidateRetrieval() {
     // 40 seeded points in 4 dimensions
@@ -1154,6 +1208,7 @@ int main() {
         testExactSearch();
         testRetrievalMetrics();
         testSearchArgs();
+        testVerifyArgs();
         testCandidateRetrieval();
         testDatasetPaths();
         testGroundTruthHomography();
