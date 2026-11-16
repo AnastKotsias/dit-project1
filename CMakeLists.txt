@@ -18,71 +18,54 @@ endif()
 # Eigen only computes the SVD of the DLT matrix; DLT, matching and RANSAC are project code
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
+# everything except the program entry points, shared by search, verify and the tests
+set(IMAGE_SEARCH_SOURCES
+    src/command_line.cpp
+    src/search_setup.cpp
+    src/dataset.cpp
+    src/image_features.cpp
+    src/local_features.cpp
+    src/descriptor_matching.cpp
+    src/homography.cpp
+    src/geometric_verification.cpp
+    src/geometric_evaluation.cpp
+    src/verification_output.cpp
+    src/kmeans.cpp
+    src/vocabulary.cpp
+    src/pipeline.cpp
+    src/search/common.cpp
+    src/search/exact.cpp
+    src/search/lsh.cpp
+    src/search/hypercube.cpp
+    src/search/ivfflat.cpp
+    src/search/ivfpq.cpp
+    src/search/output.cpp
+)
+
 if(BUILD_SEARCH_APP)
     # OpenCV only reads images (imgcodecs) and computes SIFT descriptors (features2d)
     find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
 
-    add_executable(search
-        src/main.cpp
-        src/command_line.cpp
-        src/search_setup.cpp
-        src/dataset.cpp
-        src/image_features.cpp
-        src/local_features.cpp
-        src/descriptor_matching.cpp
-        src/homography.cpp
-        src/geometric_verification.cpp
-        src/geometric_evaluation.cpp
-        src/verification_output.cpp
-        src/kmeans.cpp
-        src/vocabulary.cpp
-        src/pipeline.cpp
-        src/experiment.cpp
-        src/search/common.cpp
-        src/search/exact.cpp
-        src/search/lsh.cpp
-        src/search/hypercube.cpp
-        src/search/ivfflat.cpp
-        src/search/ivfpq.cpp
-        src/search/output.cpp
-    )
+    add_executable(search src/main.cpp src/experiment.cpp ${IMAGE_SEARCH_SOURCES})
 
-    target_include_directories(search PRIVATE include)
-    target_link_libraries(search PRIVATE ${OpenCV_LIBS} Eigen3::Eigen)
+    # assignment 2: TopC candidates of the same index, SIFT matching, RANSAC and reranking
+    add_executable(verify src/verify_main.cpp ${IMAGE_SEARCH_SOURCES})
 
     # optional: only parallelizes image preprocessing, results are identical without it
     find_package(OpenMP)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(search PRIVATE OpenMP::OpenMP_CXX)
-    endif()
+    foreach(app search verify)
+        target_include_directories(${app} PRIVATE include)
+        target_link_libraries(${app} PRIVATE ${OpenCV_LIBS} Eigen3::Eigen)
+        if(OpenMP_CXX_FOUND)
+            target_link_libraries(${app} PRIVATE OpenMP::OpenMP_CXX)
+        endif()
+    endforeach()
 endif()
 
 if(BUILD_TESTING)
     find_package(OpenCV REQUIRED COMPONENTS core imgcodecs features2d)
 
-    add_executable(image_search_tests
-        tests/unit_tests.cpp
-        src/command_line.cpp
-        src/search_setup.cpp
-        src/dataset.cpp
-        src/image_features.cpp
-        src/local_features.cpp
-        src/descriptor_matching.cpp
-        src/homography.cpp
-        src/geometric_verification.cpp
-        src/geometric_evaluation.cpp
-        src/verification_output.cpp
-        src/kmeans.cpp
-        src/vocabulary.cpp
-        src/pipeline.cpp
-        src/search/common.cpp
-        src/search/exact.cpp
-        src/search/lsh.cpp
-        src/search/hypercube.cpp
-        src/search/ivfflat.cpp
-        src/search/ivfpq.cpp
-        src/search/output.cpp
-    )
+    add_executable(image_search_tests tests/unit_tests.cpp ${IMAGE_SEARCH_SOURCES})
 
     target_include_directories(image_search_tests PRIVATE include src/search)
     target_link_libraries(image_search_tests PRIVATE ${OpenCV_LIBS} Eigen3::Eigen)
