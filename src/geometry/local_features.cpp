@@ -1,6 +1,7 @@
 #include "geometry/local_features.hpp"
 
-#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -33,7 +34,7 @@ LocalFeatureSet extract_sift_features(const std::filesystem::path& image_path) {
 
     LocalFeatureSet result;
     result.points.reserve(keypoints.size());
-    result.descriptors = DescriptorMatrix(
+    result.descriptors = LocalDescriptorMatrix(
         static_cast<std::size_t>(descriptors.rows),
         static_cast<std::size_t>(descriptors.cols));
     for(std::size_t row = 0; row < result.descriptors.rows; ++row) {
@@ -41,8 +42,14 @@ LocalFeatureSet extract_sift_features(const std::filesystem::path& image_path) {
             static_cast<double>(keypoints[row].pt.x),
             static_cast<double>(keypoints[row].pt.y)});
         const float* source = descriptors.ptr<float>(static_cast<int>(row));
-        std::copy(source, source + result.descriptors.cols,
-                  result.descriptors.row(row));
+        std::uint8_t* target = result.descriptors.row(row);
+        for(std::size_t column = 0; column < result.descriptors.cols; ++column) {
+            // byte copy is exact only for whole numbers 0..255, NaN fails the range test
+            const float value = source[column];
+            if(!(value >= 0.0F && value <= 255.0F) || value != std::floor(value))
+                throw std::runtime_error("SIFT descriptor value is not a whole number 0..255");
+            target[column] = static_cast<std::uint8_t>(value);
+        }
     }
     result.status = SiftExtractionStatus::Success;
     result.width = width;

@@ -24,8 +24,12 @@ const char* sift_extraction_status_name(SiftExtractionStatus status) {
 
 SiftExtractionResult extract_sift_descriptors(
     const std::filesystem::path& image_path) {
-    auto features = extract_sift_features(image_path);
-    return {std::move(features.descriptors), features.status};
+    const auto features = extract_sift_features(image_path);
+    // bytes back to float for BoVW, exact for whole numbers 0..255
+    DescriptorMatrix descriptors(features.descriptors.rows, features.descriptors.cols);
+    std::copy(features.descriptors.data.begin(), features.descriptors.data.end(),
+              descriptors.data.begin());
+    return {std::move(descriptors), features.status};
 }
 
 DescriptorMatrix sample_training_descriptors(

@@ -11,9 +11,12 @@
 #include "evaluation/verification_output.hpp"
 
 #include <opencv2/core.hpp>
+#include <opencv2/features2d.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -797,6 +800,20 @@ void testLocalFeatures() {
           "local feature extraction stored the wrong image size");
     check(features.points.size() == features.descriptors.rows,
           "keypoints and descriptors are misaligned");
+    // stored bytes equal the float values of OpenCV SIFT
+    std::vector<cv::KeyPoint> keypoints;
+    cv::Mat reference;
+    cv::SIFT::create()->detectAndCompute(board, cv::noArray(), keypoints, reference);
+    bool same_values = reference.rows == static_cast<int>(features.descriptors.rows) &&
+                       reference.cols == static_cast<int>(features.descriptors.cols);
+    for(std::size_t row = 0; same_values && row < features.descriptors.rows; ++row) {
+        for(std::size_t column = 0; column < features.descriptors.cols; ++column)
+            same_values = same_values &&
+                          static_cast<float>(features.descriptors.row(row)[column]) ==
+                              reference.at<float>(static_cast<int>(row),
+                                                  static_cast<int>(column));
+    }
+    check(same_values, "byte descriptors differ from the OpenCV SIFT values");
     for(const auto& point : features.points) {
         check(point[0] >= 0.0 && point[0] < 160.0 &&
                   point[1] >= 0.0 && point[1] < 120.0,
@@ -894,14 +911,14 @@ void testBowRecordIndices() {
 void testDescriptorMatching() {
     image_search::LocalFeatureSet query;
     query.points = {{{1.0, 2.0}, {3.0, 4.0}}};
-    query.descriptors = image_search::DescriptorMatrix(2, 128);
-    query.descriptors.row(1)[0] = 10.0F;
+    query.descriptors = image_search::LocalDescriptorMatrix(2, 128);
+    query.descriptors.row(1)[0] = 10;
 
     image_search::LocalFeatureSet candidate;
     candidate.points = {{{5.0, 6.0}, {7.0, 8.0}, {9.0, 10.0}}};
-    candidate.descriptors = image_search::DescriptorMatrix(3, 128);
-    candidate.descriptors.row(1)[0] = 1.0F;
-    candidate.descriptors.row(2)[0] = 20.0F;
+    candidate.descriptors = image_search::LocalDescriptorMatrix(3, 128);
+    candidate.descriptors.row(1)[0] = 1;
+    candidate.descriptors.row(2)[0] = 20;
 
     const auto matches = image_search::match_descriptors(query, candidate, 0.5);
     check(matches.size() == 1, "descriptor ratio matching accepted the wrong matches");
@@ -909,7 +926,7 @@ void testDescriptorMatching() {
           matches.front().candidate_descriptor_index == 0,
           "descriptor matching selected the wrong nearest descriptors");
 
-    candidate.descriptors.data[3] = 0.0F;
+    candidate.descriptors.data[3] = 0;
     const auto tied = image_search::match_descriptors(query, candidate, 0.5);
     check(tied.front().candidate_descriptor_index == 0,
           "descriptor matching did not use the lowest index for a tie");
@@ -917,32 +934,44 @@ void testDescriptorMatching() {
                 "descriptor matching accepted an invalid rho");
 
     candidate.points.resize(1);
-    candidate.descriptors = image_search::DescriptorMatrix(1, 128);
+    candidate.descriptors = image_search::LocalDescriptorMatrix(1, 128);
     check(image_search::match_descriptors(query, candidate, 0.5).empty(),
           "descriptor matching accepted a candidate with one descriptor");
 
     // d1 / d2 = 0.9 fails rho = 0.85, though D1 / D2 = 0.81
     image_search::LocalFeatureSet single_query;
     single_query.points = {{{1.0, 2.0}}};
-    single_query.descriptors = image_search::DescriptorMatrix(1, 128);
+    single_query.descriptors = image_search::LocalDescriptorMatrix(1, 128);
     image_search::LocalFeatureSet ratio_candidate;
     ratio_candidate.points = {{{5.0, 6.0}, {7.0, 8.0}}};
-    ratio_candidate.descriptors = image_search::DescriptorMatrix(2, 128);
-    ratio_candidate.descriptors.row(0)[0] = 9.0F;
-    ratio_candidate.descriptors.row(1)[0] = 10.0F;
+    ratio_candidate.descriptors = image_search::LocalDescriptorMatrix(2, 128);
+    ratio_candidate.descriptors.row(0)[0] = 9;
+    ratio_candidate.descriptors.row(1)[0] = 10;
     check(image_search::match_descriptors(single_query, ratio_candidate, 0.85).empty(),
           "descriptor matching compared squared distances with rho instead of rho squared");
 
     // d1 / d2 = 0.8 passes rho = 0.85
-    ratio_candidate.descriptors.row(0)[0] = 8.0F;
+    ratio_candidate.descriptors.row(0)[0] = 8;
     const auto ratio_matches =
         image_search::match_descriptors(single_query, ratio_candidate, 0.85);
     check(ratio_matches.size() == 1 &&
               std::abs(ratio_matches.front().descriptor_distance - 8.0) < 1e-12,
           "descriptor matching rejected a match below the Lowe ratio");
+
+    // largest distances: D1 = 128 * 254^2, D2 = 128 * 255^2, d1 / d2 = 254 / 255
+    std::fill(single_query.descriptors.data.begin(), single_query.descriptors.data.end(), 255);
+    std::fill(ratio_candidate.descriptors.row(0), ratio_candidate.descriptors.row(0) + 128, 1);
+    std::fill(ratio_candidate.descriptors.row(1), ratio_candidate.descriptors.row(1) + 128, 0);
+    const auto extreme_matches =
+        image_search::match_descriptors(single_query, ratio_candidate, 0.999);
+    check(extreme_matches.size() == 1 &&
+              extreme_matches.front().candidate_descriptor_index == 0 &&
+              std::abs(extreme_matches.front().descriptor_distance -
+                       254.0 * std::sqrt(128.0)) < 1e-9,
+          "descriptor matching overflowed on the largest SIFT distances");
 }
 
-// Test the early-exit distance against full distances on SIFT-like integer descriptors.
+// Test the int32 matching distance against full double distances on SIFT-like integer descriptors.
 void testDescriptorMatchingReference() {
     // sparse integers 0..255 like OpenCV SIFT, spread distances make d1/d2 close to rho
     std::mt19937 rng(7);
@@ -950,14 +979,19 @@ void testDescriptorMatchingReference() {
     std::bernoulli_distribution nonzero(0.3);
     const auto random_features = [&](std::size_t count) {
         image_search::LocalFeatureSet features;
-        features.descriptors = image_search::DescriptorMatrix(count, 128);
+        features.descriptors = image_search::LocalDescriptorMatrix(count, 128);
         for(std::size_t row = 0; row < count; ++row) {
             features.points.push_back({static_cast<double>(row), 0.0});
             for(std::size_t column = 0; column < 128; ++column)
                 features.descriptors.row(row)[column] =
-                    nonzero(rng) ? static_cast<float>(value(rng)) : 0.0F;
+                    nonzero(rng) ? static_cast<std::uint8_t>(value(rng)) : 0;
         }
         return features;
+    };
+    // value moved by amount towards the middle, stays within 0..255
+    const auto shifted = [](std::uint8_t original, int amount) {
+        const int sign = original > 127 ? -1 : 1;
+        return static_cast<std::uint8_t>(original + sign * amount);
     };
     auto query = random_features(200);
     auto candidate = random_features(150);
@@ -965,7 +999,7 @@ void testDescriptorMatchingReference() {
     for(std::size_t row = 0; row < 20; ++row) {
         for(std::size_t column = 0; column < 128; ++column)
             candidate.descriptors.row(2 * row)[column] =
-                query.descriptors.row(row)[column] + (column == row ? 3.0F : 0.0F);
+                shifted(query.descriptors.row(row)[column], column == row ? 3 : 0);
     }
     for(std::size_t column = 0; column < 128; ++column) {
         candidate.descriptors.row(41)[column] = candidate.descriptors.row(40)[column];
@@ -974,10 +1008,9 @@ void testDescriptorMatchingReference() {
     // D1 = 128*5^2 then D2 = 128*6^2, d1/d2 = 0.833 < rho only if D2 is summed past D1
     for(std::size_t k = 0; k < 10; ++k) {
         for(std::size_t column = 0; column < 128; ++column) {
-            const float q_value = query.descriptors.row(150 + k)[column];
-            const float sign = q_value > 127.0F ? -1.0F : 1.0F;
-            candidate.descriptors.row(120 + 2 * k)[column] = q_value + 5.0F * sign;
-            candidate.descriptors.row(121 + 2 * k)[column] = q_value + 6.0F * sign;
+            const std::uint8_t q_value = query.descriptors.row(150 + k)[column];
+            candidate.descriptors.row(120 + 2 * k)[column] = shifted(q_value, 5);
+            candidate.descriptors.row(121 + 2 * k)[column] = shifted(q_value, 6);
         }
     }
 
@@ -1020,7 +1053,7 @@ void testDescriptorMatchingReference() {
                matches[i].candidate_descriptor_index == expected[i].candidate_descriptor_index &&
                matches[i].descriptor_distance == expected[i].descriptor_distance;
     }
-    check(same, "early-exit descriptor matching differs from the full distances");
+    check(same, "int32 descriptor matching differs from the full distances");
 }
 
 // Test homography projection and invalid denominator handling.
@@ -1219,10 +1252,10 @@ void testHomographyRansac() {
 image_search::LocalFeatureSet distinctFeatures(const std::vector<image_search::Point2>& points) {
     image_search::LocalFeatureSet features;
     features.points = points;
-    features.descriptors = image_search::DescriptorMatrix(points.size(), 128);
+    features.descriptors = image_search::LocalDescriptorMatrix(points.size(), 128);
     // D1 = 0 for the same row, D2 = 2 * 100^2 for any other row
     for(std::size_t row = 0; row < points.size(); ++row)
-        features.descriptors.row(row)[row] = 100.0F;
+        features.descriptors.row(row)[row] = 100;
     features.status = image_search::SiftExtractionStatus::Success;
     return features;
 }
