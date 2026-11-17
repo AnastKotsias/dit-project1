@@ -139,9 +139,9 @@ int main(int argc, char** argv) {
         }
 
         image_search::write_verification_results(search_args.out_file, output_name,
-                                                 evaluations);
+                                                 args.candidate_count, evaluations);
         std::cout << "wrote verification results to " << search_args.out_file << "\n";
-        // only the returned candidates are verified, the study reports how often C is not reached
+        // also in the output file as QueriesBelowC
         std::size_t short_results = 0;
         for(const auto& evaluation : evaluations)
             if(evaluation.candidate_count < args.candidate_count)

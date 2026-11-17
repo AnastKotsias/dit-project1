@@ -624,7 +624,8 @@ void testVerificationOutput() {
                            std::istreambuf_iterator<char>());
     };
     const auto path = std::filesystem::temp_directory_path() / "image_search_verify_output";
-    image_search::write_verification_results(path.string(), "Exact", {first, second});
+    // C = 2: only i_b returned fewer candidates
+    image_search::write_verification_results(path.string(), "Exact", 2, {first, second});
     const std::string text = read_output(path);
 
     check(text.rfind("Exact\nQuery: v_a\nCandidates: 2\n"
@@ -653,12 +654,13 @@ void testVerificationOutput() {
         "AccurateHomographyRate5px: 0.1000\nMeanCornerErrorPx: 2.0000\n"
         "AccurateHomographyRate1px: 0.0000\nAccurateHomographyRate3px: 0.1000\n"
         "MeanMatchCountRecall@5: 0.1000\nMeanMatchCountRecall@10: 0.1000\n"
-        "MeanMatchCountMAP@10: 0.0250\n";
+        "MeanMatchCountMAP@10: 0.0250\nQueriesBelowC: 1\n";
     check(text.find("\n\n" + summary + "Illumination-Queries: 1\n") != std::string::npos,
           "verify output summary is incorrect");
     // i_b alone: no valid estimate; v_a alone: 1 valid pair of 5
     check(text.find("Illumination-MeanBeforeRecall@5: 0.0000\n") != std::string::npos &&
-              text.find("Illumination-MeanCornerErrorPx: NA\n") != std::string::npos,
+              text.find("Illumination-MeanCornerErrorPx: NA\n") != std::string::npos &&
+              text.find("Illumination-QueriesBelowC: 1\n") != std::string::npos,
           "verify output illumination summary is incorrect");
     const std::string viewpoint_start =
         "Viewpoint-Queries: 1\nViewpoint-MeanBeforeRecall@5: 0.2000\n";
@@ -666,19 +668,24 @@ void testVerificationOutput() {
               text.find("Viewpoint-ValidHomographyRate: 0.2000\n") != std::string::npos &&
               text.find("Viewpoint-MeanCornerErrorPx: 2.0000\n") != std::string::npos,
           "verify output viewpoint summary is incorrect");
-    const std::string last_line = "Viewpoint-MeanMatchCountMAP@10: 0.0500\n";
-    check(text.compare(text.size() - last_line.size(), last_line.size(), last_line) == 0,
+    const std::string last_lines =
+        "Viewpoint-MeanMatchCountMAP@10: 0.0500\nViewpoint-QueriesBelowC: 0\n";
+    check(text.compare(text.size() - last_lines.size(), last_lines.size(), last_lines) == 0,
           "verify output does not end with the viewpoint summary");
 
     // no valid estimate: mean corner error NA, no viewpoint queries: no viewpoint lines
-    image_search::write_verification_results(path.string(), "Exact", {second});
+    image_search::write_verification_results(path.string(), "Exact", 2, {second});
     const std::string illumination_only = read_output(path);
     check(illumination_only.find("\nMeanCornerErrorPx: NA\n") != std::string::npos,
           "verify output printed a mean corner error without a valid estimate");
     check(illumination_only.find("Viewpoint-") == std::string::npos,
           "verify output printed a summary for a group without queries");
-    checkThrows([&] { image_search::write_verification_results(path.string(), "Exact", {}); },
+    checkThrows([&] { image_search::write_verification_results(path.string(), "Exact", 2, {}); },
                 "verify output accepted no queries");
+    checkThrows([&] {
+                    image_search::write_verification_results(path.string(), "Exact", 0, {second});
+                },
+                "verify output accepted C = 0");
     std::filesystem::remove(path);
 }
 

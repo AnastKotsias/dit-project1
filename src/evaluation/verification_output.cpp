@@ -1,5 +1,6 @@
 #include "evaluation/verification_output.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <stdexcept>
@@ -13,9 +14,10 @@ const std::string kMissingRank = "-";
 // printed for a missing median or mean corner error
 const std::string kNotAvailable = "NA";
 
-// summary lines, each name preceded by prefix
-void write_summary(std::ofstream& output, const VerificationSummary& summary,
-                   const std::string& prefix) {
+// summary lines of these queries, each name preceded by prefix
+void write_summary(std::ofstream& output, const std::vector<QueryEvaluation>& queries,
+                   std::size_t candidate_count, const std::string& prefix) {
+    const VerificationSummary summary = summarize_queries(queries);
     output << prefix << "MeanBeforeRecall@5: " << summary.before.recall_5 << "\n"
            << prefix << "MeanBeforeRecall@10: " << summary.before.recall_10 << "\n"
            << prefix << "MeanBeforeMAP@10: " << summary.before.ap_10 << "\n"
@@ -41,16 +43,25 @@ void write_summary(std::ofstream& output, const VerificationSummary& summary,
            << prefix << "MeanMatchCountRecall@5: " << summary.match_count.recall_5 << "\n"
            << prefix << "MeanMatchCountRecall@10: " << summary.match_count.recall_10 << "\n"
            << prefix << "MeanMatchCountMAP@10: " << summary.match_count.ap_10 << "\n";
+    // |TopC(Q)| < C: the method returned fewer candidates
+    const auto below = std::count_if(queries.begin(), queries.end(),
+                                     [&](const QueryEvaluation& query) {
+                                         return query.candidate_count < candidate_count;
+                                     });
+    output << prefix << "QueriesBelowC: " << below << "\n";
 }
 
 }  // namespace
 
 void write_verification_results(const std::string& output_path,
                                 const std::string& method_name,
+                                std::size_t candidate_count,
                                 const std::vector<QueryEvaluation>& queries) {
     // means and the 5 |Q| pair denominator need at least one query
     if(queries.empty())
         throw std::invalid_argument("verification output needs at least one query");
+    if(candidate_count == 0)
+        throw std::invalid_argument("verification output needs a positive C");
     std::ofstream output(output_path);
     if(!output)
         throw std::runtime_error("could not open output file: " + output_path);
@@ -100,7 +111,7 @@ void write_verification_results(const std::string& output_path,
                << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n\n";
     }
 
-    write_summary(output, summarize_queries(queries), "");
+    write_summary(output, queries, candidate_count, "");
     // the same lines per sequence type, after the summary of all queries
     for(const auto& [prefix, group] : {std::pair{"i_", "Illumination-"},
                                        std::pair{"v_", "Viewpoint-"}}) {
@@ -111,7 +122,7 @@ void write_verification_results(const std::string& output_path,
         if(members.empty())
             continue;
         output << group << "Queries: " << members.size() << "\n";
-        write_summary(output, summarize_queries(members), group);
+        write_summary(output, members, candidate_count, group);
     }
 }
 
