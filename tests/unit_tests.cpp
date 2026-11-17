@@ -635,7 +635,9 @@ void testVerificationOutput() {
           "verify output after-ranking lines are incorrect");
     check(text.find("After-MedianError-10: -\nBefore-Recall@5: 0.2000\nBefore-Recall@10: 0.2000\n"
                     "Before-AP@10: 0.1000\nAfter-Recall@5: 0.2000\nAfter-Recall@10: 0.2000\n"
-                    "After-AP@10: 0.2000\nMatchCount-Recall@5: 0.2000\n"
+                    "After-AP@10: 0.2000\nCandidateTimeMs: 2.0000\n"
+                    "VerificationTimeMs: 3.0000\nTotalTimeMs: 5.0000\n"
+                    "MatchCount-Recall@5: 0.2000\n"
                     "MatchCount-Recall@10: 0.2000\nMatchCount-AP@10: 0.0500\n\nQuery: i_b\n") !=
               std::string::npos,
           "verify output query metrics are incorrect");

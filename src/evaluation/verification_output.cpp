@@ -91,6 +91,10 @@ void write_verification_results(const std::string& output_path,
                << "After-Recall@5: " << query.after_metrics.recall_5 << "\n"
                << "After-Recall@10: " << query.after_metrics.recall_10 << "\n"
                << "After-AP@10: " << query.after_metrics.ap_10 << "\n"
+               // T_total = T_candidates + T_verify of this query
+               << "CandidateTimeMs: " << query.candidate_time_ms << "\n"
+               << "VerificationTimeMs: " << query.verification_time_ms << "\n"
+               << "TotalTimeMs: " << query.total_time_ms << "\n"
                << "MatchCount-Recall@5: " << query.match_count_metrics.recall_5 << "\n"
                << "MatchCount-Recall@10: " << query.match_count_metrics.recall_10 << "\n"
                << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n\n";

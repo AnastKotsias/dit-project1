@@ -12,6 +12,7 @@ namespace image_search {
 // method name, one block per query, then means, average times and homography rates
 // ranks missing from a short TopC printed as "-"
 // median error NA without a valid homography
+// per query: metrics, then candidate, verification and total time
 // appended after the required fields: AccurateHomographyRate1px/3px and the
 // match-count ranking metrics, per query and as means
 // then the summary again for the i_ and v_ sequences, e.g. Viewpoint-MeanAfterMAP@10
