@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <stdexcept>
+#include <utility>
 
 namespace image_search {
 namespace {
@@ -11,6 +12,36 @@ namespace {
 const std::string kMissingRank = "-";
 // printed for a missing median or mean corner error
 const std::string kNotAvailable = "NA";
+
+// summary lines, each name preceded by prefix
+void write_summary(std::ofstream& output, const VerificationSummary& summary,
+                   const std::string& prefix) {
+    output << prefix << "MeanBeforeRecall@5: " << summary.before.recall_5 << "\n"
+           << prefix << "MeanBeforeRecall@10: " << summary.before.recall_10 << "\n"
+           << prefix << "MeanBeforeMAP@10: " << summary.before.ap_10 << "\n"
+           << prefix << "MeanAfterRecall@5: " << summary.after.recall_5 << "\n"
+           << prefix << "MeanAfterRecall@10: " << summary.after.recall_10 << "\n"
+           << prefix << "MeanAfterMAP@10: " << summary.after.ap_10 << "\n"
+           << prefix << "AverageCandidateTimeMs: " << summary.candidate_time_ms << "\n"
+           << prefix << "AverageVerificationTimeMs: " << summary.verification_time_ms << "\n"
+           << prefix << "AverageTotalTimeMs: " << summary.total_time_ms << "\n"
+           << prefix << "ValidHomographyRate: " << summary.accuracy.valid_rate << "\n"
+           << prefix << "AccurateHomographyRate5px: " << summary.accuracy.accurate_rates[2]
+           << "\n"
+           << prefix << "MeanCornerErrorPx: ";
+    if(summary.accuracy.mean_corner_error)
+        output << *summary.accuracy.mean_corner_error << "\n";
+    else
+        output << kNotAvailable << "\n";
+    // 1 and 3 px thresholds, then the match-count ranking
+    output << prefix << "AccurateHomographyRate1px: " << summary.accuracy.accurate_rates[0]
+           << "\n"
+           << prefix << "AccurateHomographyRate3px: " << summary.accuracy.accurate_rates[1]
+           << "\n"
+           << prefix << "MeanMatchCountRecall@5: " << summary.match_count.recall_5 << "\n"
+           << prefix << "MeanMatchCountRecall@10: " << summary.match_count.recall_10 << "\n"
+           << prefix << "MeanMatchCountMAP@10: " << summary.match_count.ap_10 << "\n";
+}
 
 }  // namespace
 
@@ -65,29 +96,19 @@ void write_verification_results(const std::string& output_path,
                << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n\n";
     }
 
-    const VerificationSummary summary = summarize_queries(queries);
-    output << "MeanBeforeRecall@5: " << summary.before.recall_5 << "\n"
-           << "MeanBeforeRecall@10: " << summary.before.recall_10 << "\n"
-           << "MeanBeforeMAP@10: " << summary.before.ap_10 << "\n"
-           << "MeanAfterRecall@5: " << summary.after.recall_5 << "\n"
-           << "MeanAfterRecall@10: " << summary.after.recall_10 << "\n"
-           << "MeanAfterMAP@10: " << summary.after.ap_10 << "\n"
-           << "AverageCandidateTimeMs: " << summary.candidate_time_ms << "\n"
-           << "AverageVerificationTimeMs: " << summary.verification_time_ms << "\n"
-           << "AverageTotalTimeMs: " << summary.total_time_ms << "\n"
-           << "ValidHomographyRate: " << summary.accuracy.valid_rate << "\n"
-           << "AccurateHomographyRate5px: " << summary.accuracy.accurate_rates[2] << "\n"
-           << "MeanCornerErrorPx: ";
-    if(summary.accuracy.mean_corner_error)
-        output << *summary.accuracy.mean_corner_error << "\n";
-    else
-        output << kNotAvailable << "\n";
-    // 1 and 3 px thresholds, then the match-count ranking
-    output << "AccurateHomographyRate1px: " << summary.accuracy.accurate_rates[0] << "\n"
-           << "AccurateHomographyRate3px: " << summary.accuracy.accurate_rates[1] << "\n"
-           << "MeanMatchCountRecall@5: " << summary.match_count.recall_5 << "\n"
-           << "MeanMatchCountRecall@10: " << summary.match_count.recall_10 << "\n"
-           << "MeanMatchCountMAP@10: " << summary.match_count.ap_10 << "\n";
+    write_summary(output, summarize_queries(queries), "");
+    // the same lines per sequence type, after the summary of all queries
+    for(const auto& [prefix, group] : {std::pair{"i_", "Illumination-"},
+                                       std::pair{"v_", "Viewpoint-"}}) {
+        std::vector<QueryEvaluation> members;
+        for(const auto& query : queries)
+            if(query.sequence.rfind(prefix, 0) == 0)
+                members.push_back(query);
+        if(members.empty())
+            continue;
+        output << group << "Queries: " << members.size() << "\n";
+        write_summary(output, summarize_queries(members), group);
+    }
 }
 
 }  // namespace image_search

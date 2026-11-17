@@ -14,6 +14,7 @@ namespace image_search {
 // median error NA without a valid homography
 // appended after the required fields: AccurateHomographyRate1px/3px and the
 // match-count ranking metrics, per query and as means
+// then the summary again for the i_ and v_ sequences, e.g. Viewpoint-MeanAfterMAP@10
 // throws if queries is empty or the file cannot be opened
 void write_verification_results(const std::string& output_path,
                                 const std::string& method_name,

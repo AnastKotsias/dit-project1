@@ -649,14 +649,29 @@ void testVerificationOutput() {
         "AccurateHomographyRate1px: 0.0000\nAccurateHomographyRate3px: 0.1000\n"
         "MeanMatchCountRecall@5: 0.1000\nMeanMatchCountRecall@10: 0.1000\n"
         "MeanMatchCountMAP@10: 0.0250\n";
-    check(text.size() >= summary.size() &&
-              text.compare(text.size() - summary.size(), summary.size(), summary) == 0,
+    check(text.find("\n\n" + summary + "Illumination-Queries: 1\n") != std::string::npos,
           "verify output summary is incorrect");
+    // i_b alone: no valid estimate; v_a alone: 1 valid pair of 5
+    check(text.find("Illumination-MeanBeforeRecall@5: 0.0000\n") != std::string::npos &&
+              text.find("Illumination-MeanCornerErrorPx: NA\n") != std::string::npos,
+          "verify output illumination summary is incorrect");
+    const std::string viewpoint_start =
+        "Viewpoint-Queries: 1\nViewpoint-MeanBeforeRecall@5: 0.2000\n";
+    check(text.find(viewpoint_start) != std::string::npos &&
+              text.find("Viewpoint-ValidHomographyRate: 0.2000\n") != std::string::npos &&
+              text.find("Viewpoint-MeanCornerErrorPx: 2.0000\n") != std::string::npos,
+          "verify output viewpoint summary is incorrect");
+    const std::string last_line = "Viewpoint-MeanMatchCountMAP@10: 0.0500\n";
+    check(text.compare(text.size() - last_line.size(), last_line.size(), last_line) == 0,
+          "verify output does not end with the viewpoint summary");
 
-    // no valid estimate: mean corner error NA
+    // no valid estimate: mean corner error NA, no viewpoint queries: no viewpoint lines
     image_search::write_verification_results(path.string(), "Exact", {second});
-    check(read_output(path).find("MeanCornerErrorPx: NA\n") != std::string::npos,
+    const std::string illumination_only = read_output(path);
+    check(illumination_only.find("\nMeanCornerErrorPx: NA\n") != std::string::npos,
           "verify output printed a mean corner error without a valid estimate");
+    check(illumination_only.find("Viewpoint-") == std::string::npos,
+          "verify output printed a summary for a group without queries");
     checkThrows([&] { image_search::write_verification_results(path.string(), "Exact", {}); },
                 "verify output accepted no queries");
     std::filesystem::remove(path);
