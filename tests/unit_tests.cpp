@@ -997,6 +997,80 @@ void testVocabularyCache() {
     std::filesystem::remove(image);
 }
 
+// Test the BoVW cache: key, exact round trip and rejection of any other file
+void testBowCache() {
+    const auto directory = std::filesystem::temp_directory_path() / "image_search_bow_cache";
+    std::filesystem::remove_all(directory);
+    const auto query = writeTemporaryFile("image_search_bow_query", "1");
+    const auto database = writeTemporaryFile("image_search_bow_database", "22");
+    const auto distractor = writeTemporaryFile("image_search_bow_distractor", "333");
+    image_search::EvaluationDataset dataset;
+    dataset.queries = {{query.string(), "v_q"}};
+    dataset.database = {{database.string(), "v_q/2"}};
+    dataset.distractor_pool = {{distractor.string(), "im1.jpg"}};
+
+    // vocabulary key, set, D, then every image with its size
+    const std::string vocabulary_key = "K=2 S=500 seed=1\n";
+    const auto key = image_search::bow_cache_key(vocabulary_key, "validation", 1000, dataset);
+    check(key == vocabulary_key + "set=validation D=1000\n" + query.string() + " 1\n" +
+                     database.string() + " 2\n" + distractor.string() + " 3\n",
+          "BoVW cache key is incorrect");
+    check(image_search::bow_cache_key(vocabulary_key, "test", 1000, dataset) != key &&
+              image_search::bow_cache_key(vocabulary_key, "validation", 5000, dataset) != key &&
+              image_search::bow_cache_key("K=4 S=500 seed=1\n", "validation", 1000, dataset) !=
+                  key,
+          "BoVW cache key ignores the vocabulary, set or D");
+    const auto path = image_search::bow_cache_path(directory.string(), 2, 500, 1,
+                                                   "validation", 1000);
+    check(path == directory / "bovw_K2_S500_seed1_validation_D1000.bin",
+          "BoVW cache path is incorrect");
+
+    // values that a text format would round
+    image_search::BowCache cache;
+    cache.database_bows = {{0.1, 0.9}, {1.0 / 3.0, 2.0 / 3.0}};
+    cache.database_ids = {"v_q/2", "im1.jpg"};
+    cache.database_paths = {database, distractor};
+    cache.queries = {{query.string(), "v_q"}};
+    cache.query_bows = {{-0.0, 1e-300}};
+    cache.distractors_skipped = 7;
+    image_search::save_bow_cache(path, key, cache);
+    check(!std::filesystem::exists(path.string() + ".tmp"),
+          "BoVW cache left its temporary file");
+    const auto loaded = image_search::load_bow_cache(path, key);
+    check(loaded && loaded->database_bows == cache.database_bows &&
+              loaded->database_ids == cache.database_ids &&
+              loaded->database_paths == cache.database_paths &&
+              loaded->queries.size() == 1 && loaded->queries[0].filepath == query.string() &&
+              loaded->queries[0].identifier == "v_q" &&
+              loaded->query_bows == cache.query_bows &&
+              std::signbit(loaded->query_bows[0][0]) && loaded->distractors_skipped == 7,
+          "BoVW cache did not load the saved values exactly");
+
+    // another key, no file, a truncated or extended file
+    check(!image_search::load_bow_cache(
+              path, image_search::bow_cache_key(vocabulary_key, "test", 1000, dataset)),
+          "BoVW cache loaded a file with another key");
+    check(!image_search::load_bow_cache(directory / "none.bin", key),
+          "BoVW cache loaded a missing file");
+    const auto size = std::filesystem::file_size(path);
+    std::filesystem::resize_file(path, size - 1);
+    check(!image_search::load_bow_cache(path, key), "BoVW cache loaded a truncated file");
+    std::filesystem::resize_file(path, size + 1);
+    check(!image_search::load_bow_cache(path, key), "BoVW cache loaded a file with extra bytes");
+
+    // nothing saved for an empty, misaligned or ragged cache
+    auto misaligned = cache;
+    misaligned.database_ids.pop_back();
+    auto ragged = cache;
+    ragged.query_bows[0].push_back(0.5);
+    for(const auto& invalid : {image_search::BowCache(), misaligned, ragged})
+        checkThrows([&] { image_search::save_bow_cache(path, key, invalid); },
+                    "BoVW cache saved an invalid cache");
+    std::filesystem::remove_all(directory);
+    for(const auto& file : {query, database, distractor})
+        std::filesystem::remove(file);
+}
+
 // Test that BoVW extraction reports the input record of every successful image
 void testBowRecordIndices() {
     const auto directory = std::filesystem::temp_directory_path();
@@ -1586,6 +1660,7 @@ int main() {
         testLocalFeatures();
         testLocalFeatureStore();
         testVocabularyCache();
+        testBowCache();
         testBowRecordIndices();
         testDescriptorMatching();
         testDescriptorMatchingReference();
