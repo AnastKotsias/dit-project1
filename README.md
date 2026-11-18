@@ -10,6 +10,9 @@ The data are the full-size **HPatches** sequences (116 sequences of six images;
 `I1` is the query, `I2`–`I6` are its five relevant images) and the
 **MIRFlickr-25K** photographs, which are used only as irrelevant distractors.
 
+The second assignment (geometric verification with SIFT and RANSAC, the
+`verify` program) is documented in [README2.md](README2.md).
+
 ## Contents
 
 1. [Requirements and build](#1-requirements-and-build)
