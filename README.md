@@ -92,7 +92,7 @@ Example:
 | `-set validation\|test` | Query set | `validation` |
 | `-o <file>` | Output file | `output.txt` |
 | `-seed <int>` | Seed of every random procedure | `1` |
-| `-cache <dir>` | Optional cache of the vocabulary (§4.7); not with `-experiment` | none |
+| `-cache <dir>` | Optional cache of the vocabulary and BoVW vectors (§4.7); not with `-experiment` | none |
 | `-exact`, `-lsh`, `-hypercube`, `-ivfflat`, `-ivfpq` | Search method; exactly one is required | – |
 | `-experiment` | Run the whole study instead of a single method (§5) | – |
 
@@ -330,14 +330,20 @@ same seed and data gives the same rankings and metrics, independent of the numbe
 of threads.
 
 **Cache (optional).** With `-cache <dir>`, `search` and `verify` store the
-vocabulary in `<dir>/vocabulary_K<K>_S<S>_seed<seed>.bin` and reuse it in later
-runs. The programs work the same without the option.
+preprocessing in two files and reuse them in later runs. The programs work the
+same without the option.
 
-- The file holds its key: `K`, `S`, the seed and the path and file size of every
-  training image, which depend on the split. A file with any other key is
-  ignored and rebuilt, so a cache is never used for other parameters or data.
-- The vocabulary is stored as raw `float`s, so a cached run gives exactly the
-  same rankings and metrics as a run without the cache.
+- `<dir>/vocabulary_K<K>_S<S>_seed<seed>.bin` holds the vocabulary. Its key is
+  `K`, `S`, the seed and the path and file size of every training image, which
+  depend on the split.
+- `<dir>/bovw_K<K>_S<S>_seed<seed>_<set>_D<D>.bin` holds the BoVW vectors,
+  identifiers and image paths of the database and the queries, and the number
+  of skipped MIRFlickr images. Its key is the vocabulary key, the set, `D` and
+  the path and size of every query, database and MIRFlickr image.
+- Each file holds its key. A file with any other key is ignored and rebuilt,
+  so a cache is never used for other parameters or data.
+- Values are stored as raw `float`s and `double`s, so a cached run gives
+  exactly the same rankings and metrics as a run without the cache.
 - A file is written under a temporary name and renamed when complete. If it
   cannot be written, the run continues with a warning.
 - Delete the directory after changing the OpenCV version, which can change

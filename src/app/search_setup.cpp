@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <random>
 #include <stdexcept>
 
@@ -51,6 +52,59 @@ DescriptorMatrix build_vocabulary(const SearchArgs& args,
     << training_result.successful_images << " images ("
     << training_result.failed_images << " failed)\n";
     return vocabulary;
+}
+
+// "using N MIRFlickr distractors" line, warning first if fewer than D
+void report_distractors(int d_mir, std::size_t added, std::size_t skipped) {
+    // fewer than D means the pool ran out of usable images, so all of them are used
+    if(added < static_cast<std::size_t>(d_mir)) {
+        std::cerr << "warning: only " << added
+                  << " usable MIRFlickr images for -D=" << d_mir << " ("
+                  << skipped << " without SIFT descriptors), continuing with all of them\n";
+    }
+    std::cout << "using " << added << " MIRFlickr distractors (" << skipped << " skipped)\n";
+}
+
+// BoVW vectors of the database (HPatches, then distractors) and of the queries
+BowCache encode_bow_vectors(const SearchArgs& args, const EvaluationDataset& dataset,
+                            const DescriptorMatrix& vocabulary) {
+    // every HPatches database image must be usable, otherwise its sequence would
+    // lose one of its five relevant images
+    const auto hpatches_database = extract_bow_vectors(dataset.database, vocabulary);
+    if(!hpatches_database.failed_records.empty())
+        throw std::runtime_error("an HPatches database image failed descriptor extraction: " +
+                                 failure_text(hpatches_database.failed_records.front()));
+
+    // the first D usable MIRFlickr images are the distractors
+    const auto distractors = extract_bow_vectors(dataset.distractor_pool, vocabulary,
+                                                 args.d_mir);
+    report_distractors(args.d_mir, distractors.vectors.size(),
+                       distractors.failed_records.size());
+
+    BowCache result;
+    result.distractors_skipped = distractors.failed_records.size();
+    result.database_bows = hpatches_database.vectors;
+    result.database_ids = hpatches_database.identifiers;
+    result.database_bows.insert(result.database_bows.end(), distractors.vectors.begin(),
+                                distractors.vectors.end());
+    result.database_ids.insert(result.database_ids.end(),
+                               distractors.identifiers.begin(), distractors.identifiers.end());
+    // same order as the vectors: HPatches, then the distractors that were kept
+    for(const std::size_t index : hpatches_database.record_indices)
+        result.database_paths.emplace_back(dataset.database[index].filepath);
+    for(const std::size_t index : distractors.record_indices)
+        result.database_paths.emplace_back(dataset.distractor_pool[index].filepath);
+    if(result.database_bows.empty())
+        throw std::runtime_error("database contains no usable image vectors");
+
+    const auto queries = extract_bow_vectors(dataset.queries, vocabulary);
+    // a missing query cannot be evaluated
+    if(!queries.failed_records.empty())
+        throw std::runtime_error("query image failed to produce descriptors: " +
+                                 failure_text(queries.failed_records.front()));
+    result.queries = dataset.queries;
+    result.query_bows = queries.vectors;
+    return result;
 }
 
 }  // namespace
@@ -104,49 +158,46 @@ PreparedSearch prepare_search(const SearchArgs& args) {
                                  error.what());
     }
 
-    // every HPatches database image must be usable, otherwise its sequence would
-    // lose one of its five relevant images
-    const auto hpatches_database = extract_bow_vectors(evaluation_dataset.database, vocabulary);
-    if(!hpatches_database.failed_records.empty())
-        throw std::runtime_error("an HPatches database image failed descriptor extraction: " +
-                                 failure_text(hpatches_database.failed_records.front()));
-
-    // the first D usable MIRFlickr images are the distractors
-    const auto distractors = extract_bow_vectors(evaluation_dataset.distractor_pool,
-                                                 vocabulary, args.d_mir);
-    // fewer than D means the pool ran out of usable images, so all of them are used
-    const auto distractors_added = distractors.vectors.size();
-    if(distractors_added < static_cast<std::size_t>(args.d_mir)) {
-        std::cerr << "warning: only " << distractors_added
-                  << " usable MIRFlickr images for -D=" << args.d_mir << " ("
-                  << distractors.failed_records.size()
-                  << " without SIFT descriptors), continuing with all of them\n";
+    // -cache: the BoVW vectors of the same vocabulary, set, D and images, if stored
+    std::optional<BowCache> bows;
+    std::string bow_key;
+    std::filesystem::path bow_path;
+    if(use_cache) {
+        bow_key = bow_cache_key(vocabulary_key, args.set_type, args.d_mir, evaluation_dataset);
+        bow_path = bow_cache_path(args.cache_dir, args.vocab, args.s_max, args.seed,
+                                  args.set_type, args.d_mir);
+        bows = load_bow_cache(bow_path, bow_key);
+        // every HPatches image and query, as when encoded
+        if(bows && (bows->database_bows.size() < evaluation_dataset.database.size() ||
+                    bows->query_bows.size() != evaluation_dataset.queries.size()))
+            bows.reset();
+        if(bows) {
+            std::cout << "loaded BoVW vectors from cache " << bow_path.string() << "\n";
+            // distractors follow the HPatches images
+            report_distractors(args.d_mir,
+                               bows->database_bows.size() - evaluation_dataset.database.size(),
+                               bows->distractors_skipped);
+        }
     }
-    std::cout << "using " << distractors_added << " MIRFlickr distractors ("
-              << distractors.failed_records.size() << " skipped)\n";
+    if(!bows) {
+        bows = encode_bow_vectors(args, evaluation_dataset, vocabulary);
+        // the run goes on without the cache if it cannot be written
+        if(use_cache) {
+            try {
+                save_bow_cache(bow_path, bow_key, *bows);
+                std::cout << "saved BoVW vectors to cache " << bow_path.string() << "\n";
+            } catch(const std::exception& error) {
+                std::cerr << "warning: could not save BoVW cache: " << error.what() << "\n";
+            }
+        }
+    }
 
     PreparedSearch prepared;
-    prepared.database_bows = hpatches_database.vectors;
-    prepared.database_ids = hpatches_database.identifiers;
-    prepared.database_bows.insert(prepared.database_bows.end(), distractors.vectors.begin(),
-                                  distractors.vectors.end());
-    prepared.database_ids.insert(prepared.database_ids.end(),
-                                 distractors.identifiers.begin(), distractors.identifiers.end());
-    // same order as the vectors: HPatches, then the distractors that were kept
-    for(const std::size_t index : hpatches_database.record_indices)
-        prepared.database_paths.emplace_back(evaluation_dataset.database[index].filepath);
-    for(const std::size_t index : distractors.record_indices)
-        prepared.database_paths.emplace_back(evaluation_dataset.distractor_pool[index].filepath);
-    if(prepared.database_bows.empty())
-        throw std::runtime_error("database contains no usable image vectors");
-
-    const auto queries = extract_bow_vectors(evaluation_dataset.queries, vocabulary);
-    // a missing query cannot be evaluated
-    if(!queries.failed_records.empty())
-        throw std::runtime_error("query image failed to produce descriptors: " +
-                                 failure_text(queries.failed_records.front()));
-    prepared.queries = evaluation_dataset.queries;
-    prepared.query_bows = queries.vectors;
+    prepared.database_bows = std::move(bows->database_bows);
+    prepared.database_ids = std::move(bows->database_ids);
+    prepared.database_paths = std::move(bows->database_paths);
+    prepared.queries = std::move(bows->queries);
+    prepared.query_bows = std::move(bows->query_bows);
 
     std::cout << "prepared " << prepared.database_bows.size()
               << " database vectors and " << prepared.query_bows.size()
