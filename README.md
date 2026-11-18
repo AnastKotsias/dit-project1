@@ -92,6 +92,7 @@ Example:
 | `-set validation\|test` | Query set | `validation` |
 | `-o <file>` | Output file | `output.txt` |
 | `-seed <int>` | Seed of every random procedure | `1` |
+| `-cache <dir>` | Optional cache of the vocabulary (§4.7); not with `-experiment` | none |
 | `-exact`, `-lsh`, `-hypercube`, `-ivfflat`, `-ivfpq` | Search method; exactly one is required | – |
 | `-experiment` | Run the whole study instead of a single method (§5) | – |
 
@@ -327,6 +328,20 @@ Every random choice (descriptor sampling, k-means, LSH/Hypercube projections,
 IVF sampling, PQ codebooks) derives from `-seed` (default 1), so a run with the
 same seed and data gives the same rankings and metrics, independent of the number
 of threads.
+
+**Cache (optional).** With `-cache <dir>`, `search` and `verify` store the
+vocabulary in `<dir>/vocabulary_K<K>_S<S>_seed<seed>.bin` and reuse it in later
+runs. The programs work the same without the option.
+
+- The file holds its key: `K`, `S`, the seed and the path and file size of every
+  training image, which depend on the split. A file with any other key is
+  ignored and rebuilt, so a cache is never used for other parameters or data.
+- The vocabulary is stored as raw `float`s, so a cached run gives exactly the
+  same rankings and metrics as a run without the cache.
+- A file is written under a temporary name and renamed when complete. If it
+  cannot be written, the run continues with a warning.
+- Delete the directory after changing the OpenCV version, which can change
+  the SIFT descriptors without changing the key.
 
 ## 5. Experimental study
 

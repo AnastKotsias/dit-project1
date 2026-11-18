@@ -23,6 +23,8 @@ struct SearchArgs {
     std::string set_type = "validation";
     std::string out_file = "output.txt";
     int seed = 1;
+    // -cache: directory of the preprocessing cache, empty means no cache
+    std::string cache_dir;
     // search method without the leading dash, empty if none
     std::string method;
 

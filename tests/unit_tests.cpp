@@ -233,6 +233,15 @@ void testSearchArgs() {
     const auto ivfpq = image_search::parse_search_args(with({"-ivfpq", "-nprobe", "3"}));
     check(ivfpq.m_param == 16 && ivfpq.ivf_nprobe == 3 && ivfpq.ivf_kclusters == -1,
           "IVFPQ arguments are incorrect");
+    // no cache unless -cache, a directory that does not exist yet is accepted
+    const std::string cache_dir = directory + "/image_search_args_cache";
+    check(exact.cache_dir.empty() &&
+              image_search::parse_search_args(with({"-exact", "-cache", cache_dir})).cache_dir ==
+                  cache_dir,
+          "search arguments did not keep -cache");
+    const auto cache_file =
+        std::filesystem::temp_directory_path() / "image_search_args_cache_file";
+    std::ofstream(cache_file).put('x');
 
     const std::vector<std::vector<std::string>> invalid = {
         with({}),                                // no method
@@ -245,10 +254,14 @@ void testSearchArgs() {
         with({"-lsh", "-w", "nan"}),             // non-finite width
         with({"-ivfpq", "-M", "7"}),             // 256 not divisible by 7
         with({"-exact", "-set"}),                // missing value
+        with({"-exact", "-cache", ""}),          // empty cache directory
+        with({"-exact", "-cache", cache_file.string()}),  // cache path is a file
+        with({"-experiment", "-cache", cache_dir}),       // experiment builds its own vocabularies
         {"-hp", directory, "-mir", directory, "-split", "split.txt", "-exact"}};  // no -vocab
     for(const auto& arguments : invalid)
         checkThrows([&] { image_search::parse_search_args(arguments); },
                     "invalid search arguments were accepted");
+    std::filesystem::remove(cache_file);
     checkThrows([&] {
         image_search::parse_search_args({"-hp", directory + "/image_search_missing", "-mir",
                                          directory, "-split", "split.txt", "-vocab", "256",
@@ -288,6 +301,10 @@ void testVerifyArgs() {
           "verify arguments were not parsed");
     // -o -C: a file name, not the -C option
     check(example.search.out_file == "-C", "verify arguments took an option value as an option");
+    // -cache handled by the search parser
+    check(image_search::parse_verify_args(with({"-exact", "-cache", directory + "/c"}))
+                  .search.cache_dir == directory + "/c",
+          "verify arguments did not keep -cache");
 
     const std::vector<std::vector<std::string>> invalid = {
         with({"-exact", "-C", "9"}),              // C < 10

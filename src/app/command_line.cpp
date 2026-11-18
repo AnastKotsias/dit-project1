@@ -78,6 +78,7 @@ SearchArgs parse_search_args(const std::vector<std::string>& arguments) {
         else if(arg == "-set") args.set_type = value;
         else if(arg == "-o") args.out_file = value;
         else if(arg == "-seed") args.seed = parse_int(arg, value);
+        else if(arg == "-cache") args.cache_dir = value;
 
         else if(arg == "-k") args.lsh_k = parse_int(arg, value);
         else if(arg == "-L") args.lsh_l = parse_int(arg, value);
@@ -100,6 +101,19 @@ SearchArgs parse_search_args(const std::vector<std::string>& arguments) {
         throw std::invalid_argument("missing required argument -vocab");
     if(args.method.empty() && !args.experiment)
         throw std::invalid_argument("exactly one search method flag is required");
+
+    // experiment mode builds its own vocabularies
+    if(args.experiment && parsed_options.count("-cache"))
+        throw std::invalid_argument("-cache cannot be used with -experiment");
+    if(parsed_options.count("-cache")) {
+        if(args.cache_dir.empty())
+            throw std::invalid_argument("-cache needs a directory");
+        // created on the first save, but a file in its place is an error
+        std::error_code cache_error;
+        if(std::filesystem::exists(args.cache_dir, cache_error) &&
+           !std::filesystem::is_directory(args.cache_dir, cache_error))
+            throw std::invalid_argument("-cache is not a directory: " + args.cache_dir);
+    }
 
     if(args.experiment && !args.method.empty())
         throw std::invalid_argument("-experiment cannot be combined with a search method flag");

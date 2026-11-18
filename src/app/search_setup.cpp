@@ -3,6 +3,7 @@
 #include "data/pipeline.hpp"
 #include "search/search.hpp"
 #include "bovw/vocabulary.hpp"
+#include "data/cache.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -19,21 +20,10 @@ std::string failure_text(const FailedImageRecord& failed) {
     return failed.record.filepath + " (" + sift_extraction_status_name(failed.status) + ")";
 }
 
-}  // namespace
-
-PreparedSearch prepare_search(const SearchArgs& args) {
-    std::map<std::string, std::vector<std::string>> splits;
-    try {
-        splits = load_dataset_splits(args.split_file);
-    } catch(const std::exception& error) {
-        throw std::runtime_error(std::string("failed to load split file: ") + error.what());
-    }
-    std::cout << "loaded " << splits["train"].size() << " training sequences\n";
-
-    auto train_paths = get_training_image_paths(args.hp_path, splits["train"]);
-    std::cout << "found " << train_paths.size() << " training images\n";
-
-    // vocabulary: sample SIFT descriptors of the training images and cluster them
+// vocabulary: sample SIFT descriptors of the training images and cluster them
+// rng only used here, so a cached vocabulary leaves the rest of the run unchanged
+DescriptorMatrix build_vocabulary(const SearchArgs& args,
+                                  const std::vector<std::filesystem::path>& train_paths) {
     std::mt19937 rng(args.seed);
     std::cout << "extracting and sampling sift descriptors for vocabulary...\n";
     const auto training_result = extract_training_descriptors(train_paths, args.s_max, rng);
@@ -60,6 +50,49 @@ PreparedSearch prepare_search(const SearchArgs& args) {
     std::cout << "vocabulary computed successfully using "
     << training_result.successful_images << " images ("
     << training_result.failed_images << " failed)\n";
+    return vocabulary;
+}
+
+}  // namespace
+
+PreparedSearch prepare_search(const SearchArgs& args) {
+    std::map<std::string, std::vector<std::string>> splits;
+    try {
+        splits = load_dataset_splits(args.split_file);
+    } catch(const std::exception& error) {
+        throw std::runtime_error(std::string("failed to load split file: ") + error.what());
+    }
+    std::cout << "loaded " << splits["train"].size() << " training sequences\n";
+
+    auto train_paths = get_training_image_paths(args.hp_path, splits["train"]);
+    std::cout << "found " << train_paths.size() << " training images\n";
+
+    // -cache: the vocabulary of the same K, S, seed and training images, if stored
+    const bool use_cache = !args.cache_dir.empty();
+    std::string vocabulary_key;
+    std::filesystem::path vocabulary_path;
+    DescriptorMatrix vocabulary;
+    if(use_cache) {
+        vocabulary_key = vocabulary_cache_key(train_paths, args.vocab, args.s_max, args.seed);
+        vocabulary_path = vocabulary_cache_path(args.cache_dir, args.vocab, args.s_max,
+                                                args.seed);
+        if(auto cached = load_vocabulary_cache(vocabulary_path, vocabulary_key)) {
+            vocabulary = std::move(*cached);
+            std::cout << "loaded vocabulary from cache " << vocabulary_path.string() << "\n";
+        }
+    }
+    if(vocabulary.empty()) {
+        vocabulary = build_vocabulary(args, train_paths);
+        // the run goes on without the cache if it cannot be written
+        if(use_cache) {
+            try {
+                save_vocabulary_cache(vocabulary_path, vocabulary_key, vocabulary);
+                std::cout << "saved vocabulary to cache " << vocabulary_path.string() << "\n";
+            } catch(const std::exception& error) {
+                std::cerr << "warning: could not save vocabulary cache: " << error.what() << "\n";
+            }
+        }
+    }
 
     // database and queries of the chosen split
     EvaluationDataset evaluation_dataset;
