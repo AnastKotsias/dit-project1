@@ -479,6 +479,26 @@ second assignment cover:
 The study is submitted as a separate PDF report (up to 5 pages, IEEE
 two-column template).
 
+The runs are made by [scripts/verify_experiments.sh](scripts/verify_experiments.sh):
+
+```bash
+scripts/verify_experiments.sh validation   # one parameter changed at a time
+scripts/verify_experiments.sh test         # frozen configuration, every D
+DRY_RUN=1 scripts/verify_experiments.sh validation   # print the commands only
+```
+
+- `validation` runs a base configuration (`C = 50`, `ρ = 0.8`, `τ = 3`,
+  `Tmax = 2000`) and then changes one of `C`, `ρ`, `τ`, `Tmax` at a time.
+  `p = 0.99` and `-adaptive 1` in every run.
+- `test` runs the configuration selected on validation (`TEST_C_VALUES`,
+  `TEST_RHO`, `TEST_TAU`, `TEST_T`) for `D ∈ {1000, 5000, 10000, 25000}` and
+  every method, with the method parameters selected in the first assignment.
+- Every value is a variable at the top of the script and can be set from the
+  environment, e.g. `TEST_RHO=0.75 scripts/verify_experiments.sh test`.
+- Each run writes `results/verify/<set>_<method>_D.._C.._rho.._tau.._T...txt`
+  and a `.log` with the command, the program output and the wall time. A run
+  whose output is complete is skipped, so an interrupted study can be resumed.
+
 <!-- TODO: file name of the report, how the runs were made (scripts/commands),
      the grid of C ∈ {20, 50, 100}, ρ, τ, Tmax with p = 0.99, the selected
      configuration from validation, and the test runs for D ∈ {1000, 5000,

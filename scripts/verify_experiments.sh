@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# runs ./verify for the experimental study, one output and one log file per run
+# usage: scripts/verify_experiments.sh validation|test
+# every variable below can be set from the environment, e.g. VALIDATION_D=1000
+# DRY_RUN=1 prints the commands without running them
+set -euo pipefail
+
+phase=${1:-}
+if [[ $phase != validation && $phase != test ]]; then
+    echo "usage: $0 validation|test" >&2
+    exit 1
+fi
+# paths relative to the repository root
+cd "$(dirname "$0")/.."
+
+# data and BoVW options of assignment 1
+HP=${HP:-data/hpatches-sequences-release}
+MIR=${MIR:-data/mirflickr}
+SPLIT=${SPLIT:-split.txt}
+VOCAB=${VOCAB:-256}
+S=${S:-500}
+SEED=${SEED:-1}
+OUT_DIR=${OUT_DIR:-results/verify}
+DRY_RUN=${DRY_RUN:-0}
+
+# methods separated by ';', parameters selected on validation in assignment 1 for K = 256
+ALL_METHODS="-exact;-lsh -k 4 -L 7 -w 0.1;-hypercube -kproj 10 -M 2000 -w 0.05 -probes 40;\
+-ivfflat -kclusters 6 -nprobe 2;-ivfpq -kclusters 6 -nprobe 2 -M 16 -nbits 8"
+VALIDATION_METHODS=${VALIDATION_METHODS-"-exact"}
+TEST_METHODS=${TEST_METHODS-$ALL_METHODS}
+
+# validation: base configuration, then one parameter changed at a time
+VALIDATION_D=${VALIDATION_D:-10000}
+BASE_C=${BASE_C:-50}
+BASE_RHO=${BASE_RHO:-0.8}
+BASE_TAU=${BASE_TAU:-3}
+BASE_T=${BASE_T:-2000}
+C_VALUES=${C_VALUES-"20 50 100"}
+RHO_VALUES=${RHO_VALUES-"0.7 0.75 0.8 0.85"}
+TAU_VALUES=${TAU_VALUES-"1 2 3 5"}
+T_VALUES=${T_VALUES-"500 1000 2000 5000"}
+
+# test: the configuration frozen after validation, for every D
+TEST_D_VALUES=${TEST_D_VALUES-"1000 5000 10000 25000"}
+TEST_C_VALUES=${TEST_C_VALUES-"50"}
+TEST_RHO=${TEST_RHO:-0.8}
+TEST_TAU=${TEST_TAU:-3}
+TEST_T=${TEST_T:-2000}
+
+# p = 0.99 in every run
+P=${P:-0.99}
+ADAPTIVE=${ADAPTIVE:-1}
+
+if [[ $DRY_RUN != 1 ]]; then
+    if [[ ! -x ./verify ]]; then
+        echo "error: ./verify not found, build it with make" >&2
+        exit 1
+    fi
+    mkdir -p "$OUT_DIR"
+fi
+
+# run <method options> <set> <D> <C> <rho> <tau> <T>
+# skips a run whose output is complete, so an interrupted study can be resumed
+run() {
+    local method=$1 set=$2 d=$3 c=$4 rho=$5 tau=$6 trials=$7
+    local method_args
+    read -r -a method_args <<< "$method"
+    # e.g. validation_exact_D10000_C50_rho0.8_tau3_T2000
+    local name="${set}_${method_args[0]#-}_D${d}_C${c}_rho${rho}_tau${tau}_T${trials}"
+    local output="$OUT_DIR/$name.txt"
+    local log="$OUT_DIR/$name.log"
+    local command=(./verify -hp "$HP" -mir "$MIR" -split "$SPLIT" -vocab "$VOCAB" -S "$S"
+                   -D "$d" -set "$set" "${method_args[@]}"
+                   -C "$c" -rho "$rho" -tau "$tau" -T "$trials" -p "$P" -adaptive "$ADAPTIVE"
+                   -seed "$SEED" -o "$output")
+
+    if [[ $DRY_RUN == 1 ]]; then
+        printf '%q ' "${command[@]}"
+        echo
+        return
+    fi
+    # verify writes the file only at the end, the summary marks a finished run
+    if [[ -s $output ]] && grep -q '^MeanAfterMAP@10:' "$output"; then
+        echo "skipped $name, output exists"
+        return
+    fi
+
+    echo "running $name"
+    local start=$SECONDS status=0
+    {
+        printf '%q ' "${command[@]}"
+        echo
+    } > "$log"
+    "${command[@]}" >> "$log" 2>&1 || status=$?
+    echo "wall time: $((SECONDS - start)) s" >> "$log"
+    if (( status != 0 )); then
+        echo "error: $name failed with status $status, see $log" >&2
+        exit "$status"
+    fi
+}
+
+IFS=';' read -r -a validation_methods <<< "$VALIDATION_METHODS"
+IFS=';' read -r -a test_methods <<< "$TEST_METHODS"
+
+if [[ $phase == validation ]]; then
+    # "C rho tau T" of every run, the base configuration only once
+    configs=()
+    add_config() {
+        local config="$*" existing
+        for existing in "${configs[@]}"; do
+            [[ $existing == "$config" ]] && return
+        done
+        configs+=("$config")
+    }
+    add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$BASE_T"
+    for c in $C_VALUES; do add_config "$c" "$BASE_RHO" "$BASE_TAU" "$BASE_T"; done
+    for rho in $RHO_VALUES; do add_config "$BASE_C" "$rho" "$BASE_TAU" "$BASE_T"; done
+    for tau in $TAU_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$tau" "$BASE_T"; done
+    for trials in $T_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$trials"; done
+
+    for method in "${validation_methods[@]}"; do
+        for config in "${configs[@]}"; do
+            read -r c rho tau trials <<< "$config"
+            run "$method" validation "$VALIDATION_D" "$c" "$rho" "$tau" "$trials"
+        done
+    done
+else
+    for method in "${test_methods[@]}"; do
+        for d in $TEST_D_VALUES; do
+            for c in $TEST_C_VALUES; do
+                run "$method" test "$d" "$c" "$TEST_RHO" "$TEST_TAU" "$TEST_T"
+            done
+        done
+    done
+fi
