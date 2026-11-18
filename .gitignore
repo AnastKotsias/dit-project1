@@ -2,7 +2,7 @@ build/
 *.o
 .idea/
 .vscode/
-data/
+/data/
 HPatches/
 MIRFlickr-25K/
 /search

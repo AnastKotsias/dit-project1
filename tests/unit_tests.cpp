@@ -1,4 +1,5 @@
 #include "app/command_line.hpp"
+#include "data/cache.hpp"
 #include "data/dataset.hpp"
 #include "geometry/descriptor_matching.hpp"
 #include "evaluation/geometric_evaluation.hpp"
@@ -918,6 +919,67 @@ void testLocalFeatureStore() {
         std::filesystem::remove(path);
 }
 
+// Test the vocabulary cache: key, exact round trip and rejection of any other file
+void testVocabularyCache() {
+    const auto directory = std::filesystem::temp_directory_path() / "image_search_cache";
+    std::filesystem::remove_all(directory);
+    const auto image = writeTemporaryFile("image_search_cache_image", "12345");
+    const auto missing = std::filesystem::temp_directory_path() / "image_search_cache_missing";
+
+    // K, S, seed and every image with its size
+    const auto key = image_search::vocabulary_cache_key({image, missing}, 256, 500, 1);
+    check(key == "K=256 S=500 seed=1\n" + image.string() + " 5\n" + missing.string() +
+                     " missing\n",
+          "vocabulary cache key is incorrect");
+    check(image_search::vocabulary_cache_key({image}, 128, 500, 1) !=
+                  image_search::vocabulary_cache_key({image}, 256, 500, 1) &&
+              image_search::vocabulary_cache_key({image}, 256, 400, 1) !=
+                  image_search::vocabulary_cache_key({image}, 256, 500, 1) &&
+              image_search::vocabulary_cache_key({image}, 256, 500, 2) !=
+                  image_search::vocabulary_cache_key({image}, 256, 500, 1),
+          "vocabulary cache key ignores K, S or seed");
+    const auto path = image_search::vocabulary_cache_path(directory.string(), 256, 500, 1);
+    check(path == directory / "vocabulary_K256_S500_seed1.bin",
+          "vocabulary cache path is incorrect");
+
+    // values that a text format would round
+    image_search::DescriptorMatrix vocabulary(2, 3);
+    vocabulary.data = {0.1F, -0.0F, 1e-30F, 3.4e38F, 255.0F, 1.0F / 3.0F};
+    image_search::save_vocabulary_cache(path, key, vocabulary);
+    check(!std::filesystem::exists(path.string() + ".tmp"),
+          "vocabulary cache left its temporary file");
+    const auto loaded = image_search::load_vocabulary_cache(path, key);
+    check(loaded && loaded->rows == 2 && loaded->cols == 3 &&
+              std::equal(vocabulary.data.begin(), vocabulary.data.end(), loaded->data.begin(),
+                         [](float a, float b) { return std::signbit(a) == std::signbit(b) && a == b; }),
+          "vocabulary cache did not load the saved values exactly");
+
+    // another key, no file, a truncated or extended file
+    check(!image_search::load_vocabulary_cache(
+              path, image_search::vocabulary_cache_key({image}, 256, 500, 2)),
+          "vocabulary cache loaded a file with another key");
+    check(!image_search::load_vocabulary_cache(directory / "none.bin", key),
+          "vocabulary cache loaded a missing file");
+    const auto size = std::filesystem::file_size(path);
+    std::filesystem::resize_file(path, size - 1);
+    check(!image_search::load_vocabulary_cache(path, key),
+          "vocabulary cache loaded a truncated file");
+    std::filesystem::resize_file(path, size + 1);
+    check(!image_search::load_vocabulary_cache(path, key),
+          "vocabulary cache loaded a file with extra bytes");
+    // not a cache file
+    writeTemporaryFile("image_search_cache/vocabulary_K256_S500_seed1.bin", "image_search");
+    check(!image_search::load_vocabulary_cache(path, key),
+          "vocabulary cache loaded a file without its header");
+
+    checkThrows([&] {
+                    image_search::save_vocabulary_cache(path, key, image_search::DescriptorMatrix());
+                },
+                "vocabulary cache saved an empty vocabulary");
+    std::filesystem::remove_all(directory);
+    std::filesystem::remove(image);
+}
+
 // Test that BoVW extraction reports the input record of every successful image
 void testBowRecordIndices() {
     const auto directory = std::filesystem::temp_directory_path();
@@ -1506,6 +1568,7 @@ int main() {
         testVerificationOutput();
         testLocalFeatures();
         testLocalFeatureStore();
+        testVocabularyCache();
         testBowRecordIndices();
         testDescriptorMatching();
         testDescriptorMatchingReference();

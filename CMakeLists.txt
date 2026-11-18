@@ -24,6 +24,7 @@ set(IMAGE_SEARCH_SOURCES
     src/app/search_setup.cpp
     src/data/dataset.cpp
     src/data/pipeline.cpp
+    src/data/cache.cpp
     src/bovw/image_features.cpp
     src/bovw/kmeans.cpp
     src/bovw/vocabulary.cpp
