@@ -86,6 +86,12 @@ std::array<PairEvaluation, 5> evaluate_relevant_pairs(
         if(found == ranking.end())
             continue;
         pair.retrieved = true;
+        // original_rank is 0-based, position in ranking is the new rank
+        pair.before_rank = found->candidate.original_rank + 1;
+        pair.after_rank = static_cast<std::size_t>(found - ranking.begin()) + 1;
+        // S(I) = 0 on RANSAC failure
+        pair.match_count = found->match_count;
+        pair.inlier_count = final_inlier_count(*found);
         // RANSAC failure: invalid and not accurate, no corner error
         if(!found->homography.valid)
             continue;

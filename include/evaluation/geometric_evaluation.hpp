@@ -43,12 +43,18 @@ struct PairEvaluation {
     int image_number = 0;
     // Ij belongs to TopC(Q), so RANSAC ran on it
     bool retrieved = false;
+    // 1-based ranks in TopC(Q) before and after reranking, 0 if not retrieved
+    std::size_t before_rank = 0;
+    std::size_t after_rank = 0;
+    // M Lowe matches and S(I) final inliers, 0 if not retrieved
+    std::size_t match_count = 0;
+    std::size_t inlier_count = 0;
     // E_corner, set only for a valid estimate H_Q->Ij
     std::optional<double> corner_error;
 };
 
 // the 5 relevant pairs (I1, Ij), j = 2..6, of the query sequence
-// ranking: the verified TopC(Q) candidates, in any order
+// ranking: the verified TopC(Q) candidates after reranking
 // query_width x query_height: size of I1, for the corners a_i
 // outside TopC or RANSAC failure: no corner error, never zero
 // H_1_j^GT loaded only for a valid estimate

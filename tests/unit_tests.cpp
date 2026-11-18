@@ -448,19 +448,37 @@ void testRelevantPairEvaluation() {
         return verification;
     };
     // v_test/6 not in TopC, non-relevant candidates ignored
-    const std::vector<image_search::CandidateVerification> ranking = {
+    std::vector<image_search::CandidateVerification> ranking = {
         verified(0, "im7.jpg", true, identity),
         verified(1, "v_test/5", true, at_infinity),
         verified(2, "v_test/3", true, identity),
         verified(3, "v_other/2", true, identity),
         verified(4, "v_test/4", false, identity),
         verified(5, "v_test/2", true, translation)};
+    // v_test/2: original rank 1, now at position 6
+    ranking[5].candidate.original_rank = 0;
+    ranking[5].match_count = 40;
+    ranking[5].homography.inlier_indices = {0, 1, 2, 3, 4, 5, 6};
+    // v_test/4: failed RANSAC keeps its matches, S(I) = 0
+    ranking[4].match_count = 9;
+    ranking[4].homography.inlier_indices = {0, 1, 2, 3};
     const auto pairs = image_search::evaluate_relevant_pairs(
         ranking, hp_dir.string(), "v_test", 160, 120);
 
     for(int j = 2; j <= 6; ++j)
         check(pairs[static_cast<std::size_t>(j - 2)].image_number == j,
               "relevant pairs are not ordered by image number");
+    // ranks from original_rank and from the position in the ranking
+    check(pairs[0].before_rank == 1 && pairs[0].after_rank == 6 &&
+              pairs[0].match_count == 40 && pairs[0].inlier_count == 7,
+          "relevant pair ranks, matches or inliers are incorrect");
+    check(pairs[1].before_rank == 3 && pairs[1].after_rank == 3,
+          "relevant pair kept in place has different ranks");
+    check(pairs[2].match_count == 9 && pairs[2].inlier_count == 0,
+          "failed RANSAC pair did not keep its matches with zero inliers");
+    check(pairs[4].before_rank == 0 && pairs[4].after_rank == 0 &&
+              pairs[4].match_count == 0 && pairs[4].inlier_count == 0,
+          "relevant image outside TopC received ranks, matches or inliers");
     // H = H_GT: zero corner error
     check(pairs[0].retrieved && pairs[0].corner_error.has_value() &&
               std::abs(*pairs[0].corner_error) < 1e-12,
