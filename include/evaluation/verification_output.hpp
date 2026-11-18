@@ -16,6 +16,7 @@ namespace image_search {
 // per query: metrics, then candidate, verification and total time
 // appended after the required fields: AccurateHomographyRate1px/3px and the
 // match-count ranking metrics, per query and as means
+// each query block ends with its 5 relevant pairs, e.g. Pair-2-Inliers
 // candidate_count: the requested C, each summary ends with QueriesBelowC
 // then the summary again for the i_ and v_ sequences, e.g. Viewpoint-MeanAfterMAP@10
 // throws if queries is empty, C is zero or the file cannot be opened

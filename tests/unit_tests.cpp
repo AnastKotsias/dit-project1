@@ -624,10 +624,20 @@ void testVerificationOutput() {
     first.candidate_time_ms = 2.0;
     first.verification_time_ms = 3.0;
     first.total_time_ms = 5.0;
+    for(int j = 2; j <= 6; ++j)
+        first.pairs[static_cast<std::size_t>(j - 2)].image_number = j;
+    // v_a/2: rank 2 before, 1 after
     first.pairs[0].retrieved = true;
+    first.pairs[0].before_rank = 2;
+    first.pairs[0].after_rank = 1;
+    first.pairs[0].match_count = 12;
+    first.pairs[0].inlier_count = 5;
     first.pairs[0].corner_error = 2.0;
     // TopC of 1, no relevant image, no valid estimate
     image_search::QueryEvaluation second;
+    second.pairs = first.pairs;
+    for(auto& pair : second.pairs)
+        pair = {pair.image_number, false, 0, 0, 0, 0, std::nullopt};
     second.sequence = "i_b";
     second.candidate_count = 1;
     second.before_ids = {"im1.jpg"};
@@ -660,9 +670,20 @@ void testVerificationOutput() {
                     "After-AP@10: 0.2000\nCandidateTimeMs: 2.0000\n"
                     "VerificationTimeMs: 3.0000\nTotalTimeMs: 5.0000\n"
                     "MatchCount-Recall@5: 0.2000\n"
-                    "MatchCount-Recall@10: 0.2000\nMatchCount-AP@10: 0.0500\n\nQuery: i_b\n") !=
+                    "MatchCount-Recall@10: 0.2000\nMatchCount-AP@10: 0.0500\n"
+                    "Pair-2-BeforeRank: 2\n") !=
               std::string::npos,
           "verify output query metrics are incorrect");
+    // v_a/2 verified with E_corner = 2 px, v_a/3 outside TopC
+    check(text.find("Pair-2-BeforeRank: 2\nPair-2-AfterRank: 1\nPair-2-Matches: 12\n"
+                    "Pair-2-Inliers: 5\nPair-2-CornerErrorPx: 2.0000\n"
+                    "Pair-3-BeforeRank: -\nPair-3-AfterRank: -\nPair-3-Matches: -\n"
+                    "Pair-3-Inliers: -\nPair-3-CornerErrorPx: NA\nPair-4-BeforeRank: -\n") !=
+              std::string::npos,
+          "verify output relevant pair lines are incorrect");
+    // block ends after Pair-6
+    check(text.find("Pair-6-CornerErrorPx: NA\n\nQuery: i_b\n") != std::string::npos,
+          "verify output query block does not end with the relevant pairs");
     // 10 pairs, one valid with E_corner = 2 px
     const std::string summary =
         "MeanBeforeRecall@5: 0.1000\nMeanBeforeRecall@10: 0.1000\nMeanBeforeMAP@10: 0.0500\n"

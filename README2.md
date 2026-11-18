@@ -146,6 +146,17 @@ TotalTimeMs: 11894.6000
 MatchCount-Recall@5: 0.8000        <- additional: ranking by Lowe matches only
 MatchCount-Recall@10: 0.8000
 MatchCount-AP@10: 0.7600
+Pair-2-BeforeRank: 1               <- additional: the relevant pair (I1, I2)
+Pair-2-AfterRank: 2
+Pair-2-Matches: 1034
+Pair-2-Inliers: 790
+Pair-2-CornerErrorPx: 1.8421
+...
+Pair-6-BeforeRank: -               <- v_bird/6 is not in TopC(Q)
+Pair-6-AfterRank: -
+Pair-6-Matches: -
+Pair-6-Inliers: -
+Pair-6-CornerErrorPx: NA
 
 Query: i_ski
 ...
@@ -181,6 +192,12 @@ are not part of the file.
 - `After-Inliers` is 0 and `After-MedianError` is `NA` for a candidate without
   a valid homography. `MeanCornerErrorPx` is `NA` when no relevant pair has a
   valid estimate. An error is never printed as 0 in place of a missing value.
+- Each query block ends with five lines for each relevant image `Ij`,
+  `j = 2..6`, looked up among all `C` candidates: its rank before and after
+  reranking, its Lowe matches, its final inliers and its corner error. An
+  `Ij` outside `TopC(Q)` prints `-` for the first four. `CornerErrorPx` is
+  `NA` without a valid estimate. These lines show the successful and failed
+  verifications of the study.
 - `QueriesBelowC` counts the queries whose method returned fewer than `C`
   candidates. Exact search always returns `C`.
 - The `Illumination-` and `Viewpoint-` blocks repeat every summary line for

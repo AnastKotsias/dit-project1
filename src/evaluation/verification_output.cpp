@@ -108,7 +108,26 @@ void write_verification_results(const std::string& output_path,
                << "TotalTimeMs: " << query.total_time_ms << "\n"
                << "MatchCount-Recall@5: " << query.match_count_metrics.recall_5 << "\n"
                << "MatchCount-Recall@10: " << query.match_count_metrics.recall_10 << "\n"
-               << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n\n";
+               << "MatchCount-AP@10: " << query.match_count_metrics.ap_10 << "\n";
+        // relevant pairs (I1, Ij), j = 2..6, from all C candidates
+        for(const auto& pair : query.pairs) {
+            const std::string name = "Pair-" + std::to_string(pair.image_number) + "-";
+            // Ij outside TopC: not verified, no ranks, matches or inliers
+            const auto value = [&](std::size_t number) {
+                return pair.retrieved ? std::to_string(number) : kMissingRank;
+            };
+            output << name << "BeforeRank: " << value(pair.before_rank) << "\n"
+                   << name << "AfterRank: " << value(pair.after_rank) << "\n"
+                   << name << "Matches: " << value(pair.match_count) << "\n"
+                   << name << "Inliers: " << value(pair.inlier_count) << "\n"
+                   << name << "CornerErrorPx: ";
+            // NA without a valid estimate, never 0
+            if(pair.corner_error)
+                output << *pair.corner_error << "\n";
+            else
+                output << kNotAvailable << "\n";
+        }
+        output << "\n";
     }
 
     write_summary(output, queries, candidate_count, "");
