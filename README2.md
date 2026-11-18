@@ -498,6 +498,9 @@ DRY_RUN=1 scripts/verify_experiments.sh validation   # print the commands only
 - Each run writes `results/verify/<set>_<method>_D.._C.._rho.._tau.._T...txt`
   and a `.log` with the command, the program output and the wall time. A run
   whose output is complete is skipped, so an interrupted study can be resumed.
+- Every run passes `-cache results/cache` (README.md §4.7), so the vocabulary
+  is built once and the BoVW vectors once per set and `D`. `CACHE_DIR=` runs
+  without the cache, with the same results.
 
 <!-- TODO: file name of the report, how the runs were made (scripts/commands),
      the grid of C ∈ {20, 50, 100}, ρ, τ, Tmax with p = 0.99, the selected

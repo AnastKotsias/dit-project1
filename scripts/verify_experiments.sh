@@ -21,6 +21,8 @@ VOCAB=${VOCAB:-256}
 S=${S:-500}
 SEED=${SEED:-1}
 OUT_DIR=${OUT_DIR:-results/verify}
+# -cache of vocabulary and BoVW vectors, shared by all runs, empty for no cache
+CACHE_DIR=${CACHE_DIR-results/cache}
 DRY_RUN=${DRY_RUN:-0}
 
 # methods separated by ';', parameters selected on validation in assignment 1 for K = 256
@@ -73,6 +75,10 @@ run() {
                    -D "$d" -set "$set" "${method_args[@]}"
                    -C "$c" -rho "$rho" -tau "$tau" -T "$trials" -p "$P" -adaptive "$ADAPTIVE"
                    -seed "$SEED" -o "$output")
+    # same results with or without it, only the preprocessing is shorter
+    if [[ -n $CACHE_DIR ]]; then
+        command+=(-cache "$CACHE_DIR")
+    fi
 
     if [[ $DRY_RUN == 1 ]]; then
         printf '%q ' "${command[@]}"
