@@ -41,6 +41,8 @@ C_VALUES=${C_VALUES-"20 50 100"}
 RHO_VALUES=${RHO_VALUES-"0.7 0.75 0.8 0.85"}
 TAU_VALUES=${TAU_VALUES-"1 2 3 5"}
 T_VALUES=${T_VALUES-"500 1000 2000 5000"}
+# the same Tmax values with -adaptive 0, every run makes all Tmax trials
+FIXED_T_VALUES=${FIXED_T_VALUES-"500 1000 2000 5000"}
 
 # test: the configuration frozen after validation, for every D
 TEST_D_VALUES=${TEST_D_VALUES-"1000 5000 10000 25000"}
@@ -48,9 +50,11 @@ TEST_C_VALUES=${TEST_C_VALUES-"50"}
 TEST_RHO=${TEST_RHO:-0.8}
 TEST_TAU=${TEST_TAU:-3}
 TEST_T=${TEST_T:-2000}
+TEST_ADAPTIVE=${TEST_ADAPTIVE:-1}
 
 # p = 0.99 in every run
 P=${P:-0.99}
+# -adaptive of every validation run except the FIXED_T_VALUES runs
 ADAPTIVE=${ADAPTIVE:-1}
 
 if [[ $DRY_RUN != 1 ]]; then
@@ -61,19 +65,19 @@ if [[ $DRY_RUN != 1 ]]; then
     mkdir -p "$OUT_DIR"
 fi
 
-# run <method options> <set> <D> <C> <rho> <tau> <T>
+# run <method options> <set> <D> <C> <rho> <tau> <T> <adaptive>
 # skips a run whose output is complete, so an interrupted study can be resumed
 run() {
-    local method=$1 set=$2 d=$3 c=$4 rho=$5 tau=$6 trials=$7
+    local method=$1 set=$2 d=$3 c=$4 rho=$5 tau=$6 trials=$7 adaptive=$8
     local method_args
     read -r -a method_args <<< "$method"
-    # e.g. validation_exact_D10000_C50_rho0.8_tau3_T2000
-    local name="${set}_${method_args[0]#-}_D${d}_C${c}_rho${rho}_tau${tau}_T${trials}"
+    # e.g. validation_exact_D10000_C50_rho0.8_tau3_T2000_adaptive1
+    local name="${set}_${method_args[0]#-}_D${d}_C${c}_rho${rho}_tau${tau}_T${trials}_adaptive${adaptive}"
     local output="$OUT_DIR/$name.txt"
     local log="$OUT_DIR/$name.log"
     local command=(./verify -hp "$HP" -mir "$MIR" -split "$SPLIT" -vocab "$VOCAB" -S "$S"
                    -D "$d" -set "$set" "${method_args[@]}"
-                   -C "$c" -rho "$rho" -tau "$tau" -T "$trials" -p "$P" -adaptive "$ADAPTIVE"
+                   -C "$c" -rho "$rho" -tau "$tau" -T "$trials" -p "$P" -adaptive "$adaptive"
                    -seed "$SEED" -o "$output")
     # same results with or without it, only the preprocessing is shorter
     if [[ -n $CACHE_DIR ]]; then
@@ -109,7 +113,7 @@ IFS=';' read -r -a validation_methods <<< "$VALIDATION_METHODS"
 IFS=';' read -r -a test_methods <<< "$TEST_METHODS"
 
 if [[ $phase == validation ]]; then
-    # "C rho tau T" of every run, the base configuration only once
+    # "C rho tau T adaptive" of every run, the base configuration only once
     configs=()
     add_config() {
         local config="$*" existing
@@ -118,23 +122,25 @@ if [[ $phase == validation ]]; then
         done
         configs+=("$config")
     }
-    add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$BASE_T"
-    for c in $C_VALUES; do add_config "$c" "$BASE_RHO" "$BASE_TAU" "$BASE_T"; done
-    for rho in $RHO_VALUES; do add_config "$BASE_C" "$rho" "$BASE_TAU" "$BASE_T"; done
-    for tau in $TAU_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$tau" "$BASE_T"; done
-    for trials in $T_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$trials"; done
+    add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$BASE_T" "$ADAPTIVE"
+    for c in $C_VALUES; do add_config "$c" "$BASE_RHO" "$BASE_TAU" "$BASE_T" "$ADAPTIVE"; done
+    for rho in $RHO_VALUES; do add_config "$BASE_C" "$rho" "$BASE_TAU" "$BASE_T" "$ADAPTIVE"; done
+    for tau in $TAU_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$tau" "$BASE_T" "$ADAPTIVE"; done
+    for trials in $T_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$trials" "$ADAPTIVE"; done
+    # Tmax without the adaptive limit, so its effect on time and quality shows
+    for trials in $FIXED_T_VALUES; do add_config "$BASE_C" "$BASE_RHO" "$BASE_TAU" "$trials" 0; done
 
     for method in "${validation_methods[@]}"; do
         for config in "${configs[@]}"; do
-            read -r c rho tau trials <<< "$config"
-            run "$method" validation "$VALIDATION_D" "$c" "$rho" "$tau" "$trials"
+            read -r c rho tau trials adaptive <<< "$config"
+            run "$method" validation "$VALIDATION_D" "$c" "$rho" "$tau" "$trials" "$adaptive"
         done
     done
 else
     for method in "${test_methods[@]}"; do
         for d in $TEST_D_VALUES; do
             for c in $TEST_C_VALUES; do
-                run "$method" test "$d" "$c" "$TEST_RHO" "$TEST_TAU" "$TEST_T"
+                run "$method" test "$d" "$c" "$TEST_RHO" "$TEST_TAU" "$TEST_T" "$TEST_ADAPTIVE"
             done
         done
     done

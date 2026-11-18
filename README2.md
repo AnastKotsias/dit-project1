@@ -192,12 +192,6 @@ are not part of the file.
 - `After-Inliers` is 0 and `After-MedianError` is `NA` for a candidate without
   a valid homography. `MeanCornerErrorPx` is `NA` when no relevant pair has a
   valid estimate. An error is never printed as 0 in place of a missing value.
-- Each query block ends with five lines for each relevant image `Ij`,
-  `j = 2..6`, looked up among all `C` candidates: its rank before and after
-  reranking, its Lowe matches, its final inliers and its corner error. An
-  `Ij` outside `TopC(Q)` prints `-` for the first four. `CornerErrorPx` is
-  `NA` without a valid estimate. These lines show the successful and failed
-  verifications of the study.
 - `QueriesBelowC` counts the queries whose method returned fewer than `C`
   candidates. Exact search always returns `C`.
 - The `Illumination-` and `Viewpoint-` blocks repeat every summary line for
@@ -478,29 +472,6 @@ second assignment cover:
 
 The study is submitted as a separate PDF report (up to 5 pages, IEEE
 two-column template).
-
-The runs are made by [scripts/verify_experiments.sh](scripts/verify_experiments.sh):
-
-```bash
-scripts/verify_experiments.sh validation   # one parameter changed at a time
-scripts/verify_experiments.sh test         # frozen configuration, every D
-DRY_RUN=1 scripts/verify_experiments.sh validation   # print the commands only
-```
-
-- `validation` runs a base configuration (`C = 50`, `ρ = 0.8`, `τ = 3`,
-  `Tmax = 2000`) and then changes one of `C`, `ρ`, `τ`, `Tmax` at a time.
-  `p = 0.99` and `-adaptive 1` in every run.
-- `test` runs the configuration selected on validation (`TEST_C_VALUES`,
-  `TEST_RHO`, `TEST_TAU`, `TEST_T`) for `D ∈ {1000, 5000, 10000, 25000}` and
-  every method, with the method parameters selected in the first assignment.
-- Every value is a variable at the top of the script and can be set from the
-  environment, e.g. `TEST_RHO=0.75 scripts/verify_experiments.sh test`.
-- Each run writes `results/verify/<set>_<method>_D.._C.._rho.._tau.._T...txt`
-  and a `.log` with the command, the program output and the wall time. A run
-  whose output is complete is skipped, so an interrupted study can be resumed.
-- Every run passes `-cache results/cache` (README.md §4.7), so the vocabulary
-  is built once and the BoVW vectors once per set and `D`. `CACHE_DIR=` runs
-  without the cache, with the same results.
 
 <!-- TODO: file name of the report, how the runs were made (scripts/commands),
      the grid of C ∈ {20, 50, 100}, ρ, τ, Tmax with p = 0.99, the selected
