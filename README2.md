@@ -484,14 +484,32 @@ second assignment cover:
 The study is submitted as a separate PDF report (up to 5 pages, IEEE
 two-column template).
 
-Validation runs are driven by
-[`scripts/verify_experiments.sh`](scripts/verify_experiments.sh) and use
-`C ∈ {20, 50, 100}`, `ρ ∈ {0.7, 0.75, 0.8, 0.85}`,
-`τ ∈ {1, 2, 3, 5}`, `Tmax ∈ {500, 1000, 2000, 5000}`, `p = 0.99`,
-and both adaptive modes. The frozen test configuration selected from the
-validation results is `C=50`, `ρ=0.7`, `τ=3`, `Tmax=2000`, `p=0.99`,
-`adaptive=1`; the test driver evaluates it for
-`D ∈ {1000, 5000, 10000, 25000}`.
+All runs are driven by
+[`scripts/verify_experiments.sh`](scripts/verify_experiments.sh), and
+[`scripts/collect_results.py`](scripts/collect_results.py) collects their
+summaries into `summary.csv` and `summary.md`. `p = 0.99` in every run.
+
+1. **`validation`**: exact search, `D = 10000`, base `C=50, ρ=0.8, τ=3,
+   Tmax=2000, adaptive=1`, one parameter changed at a time:
+   `C ∈ {20, 50, 100}`, `ρ ∈ {0.7, 0.75, 0.8, 0.85}`, `τ ∈ {1, 2, 3, 5}`,
+   `Tmax ∈ {500, 1000, 2000, 5000}` with `adaptive` 1 and 0.
+2. **Combined runs** on validation, since the best values of single
+   parameters need not combine well: `ρ ∈ {0.7, 0.75, 0.8}`, `τ ∈ {3, 5}`,
+   `Tmax ∈ {2000, 5000}`, `adaptive=0`, through the same phase:
+
+   ```bash
+   BASE_RHO=0.75 BASE_TAU=5 BASE_T=5000 ADAPTIVE=0 C_VALUES= RHO_VALUES= \
+   TAU_VALUES= T_VALUES= FIXED_T_VALUES= scripts/verify_experiments.sh validation
+   ```
+
+   ρ, τ and Tmax are tuned on exact only: the generator is seeded again for
+   every candidate, so a pair `(Q, I)` verifies the same whatever method
+   retrieved it.
+3. **Frozen configuration**: the run with the highest accurate homography
+   rate at 5 px, then the lowest mean corner error:
+   `ρ=0.8`, `τ=5`, `Tmax=5000`, `adaptive=0`.
+4. **`validation-grid`** and **`test`**: the frozen configuration for every
+   method, `D ∈ {1000, 5000, 10000, 25000}` and `C ∈ {20, 50, 100}`.
 
 ## 6. Pseudocode
 
