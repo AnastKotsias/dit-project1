@@ -4,6 +4,7 @@
 # writes <results_dir>/summary.csv (every field) and summary.md (report tables)
 import csv
 import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -23,6 +24,10 @@ SUMMARY_FIELDS = [
 ]
 # "" is the summary of all queries
 GROUPS = [("all", ""), ("illumination", "Illumination-"), ("viewpoint", "Viewpoint-")]
+# query sequence prefix of each group
+GROUP_SEQUENCES = {"all": "", "illumination": "i_", "viewpoint": "v_"}
+# corner error of one relevant pair, NA without a valid estimate
+PAIR_CORNER_ERROR = re.compile(r"^Pair-[2-6]-CornerErrorPx$")
 PARAMETERS = ["set", "method", "D", "distractors", "C", "rho", "tau", "T", "adaptive"]
 SET_ORDER = {"validation": 0, "test": 1}
 METHOD_ORDER = {"exact": 0, "lsh": 1, "hypercube": 2, "ivfflat": 3, "ivfpq": 4}
@@ -32,15 +37,29 @@ def read_fields(path):
     # "Key: value" lines, summary keys appear once per file
     fields = {}
     query_count = 0
+    # (query sequence, corner error) of every valid relevant pair
+    corner_errors = []
+    query = ""
     with open(path, encoding="utf-8") as file:
         for line in file:
             key, separator, value = line.partition(": ")
             if not separator:
                 continue
+            value = value.strip()
             if key == "Query":
                 query_count += 1
-            fields[key] = value.strip()
-    return fields, query_count
+                query = value
+            elif PAIR_CORNER_ERROR.match(key) and value != "NA":
+                corner_errors.append((query, float(value)))
+            fields[key] = value
+    return fields, query_count, corner_errors
+
+
+def median_corner_error(corner_errors, group):
+    # median over valid pairs only, like the mean; robust to a few failed pairs
+    errors = [error for query, error in corner_errors
+              if query.startswith(GROUP_SEQUENCES[group])]
+    return f"{statistics.median(errors):.4f}" if errors else "NA"
 
 
 def read_log(path):
@@ -64,7 +83,7 @@ def collect(results_dir):
         name = RUN_NAME.match(path.stem)
         if not name:
             continue
-        fields, query_count = read_fields(path)
+        fields, query_count, corner_errors = read_fields(path)
         # verify writes the file at the end, the summary marks a finished run
         if "MeanAfterMAP@10" not in fields:
             print(f"warning: skipped incomplete {path.name}", file=sys.stderr)
@@ -79,6 +98,7 @@ def collect(results_dir):
             row = dict(parameters, group=group, queries=str(queries), wall_time_s=wall_time)
             for field in SUMMARY_FIELDS:
                 row[field] = fields.get(prefix + field, "")
+            row["MedianCornerErrorPx"] = median_corner_error(corner_errors, group)
             rows.append(row)
 
     # validation first, then method, D, C, rho, tau, T, adaptive, group
@@ -91,7 +111,8 @@ def collect(results_dir):
 
 
 def write_csv(rows, path):
-    columns = PARAMETERS + ["group", "queries"] + SUMMARY_FIELDS + ["wall_time_s"]
+    columns = (PARAMETERS + ["group", "queries"] + SUMMARY_FIELDS +
+               ["MedianCornerErrorPx", "wall_time_s"])
     with open(path, "w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=columns)
         writer.writeheader()
@@ -133,11 +154,12 @@ def write_markdown(rows, path):
                  for run, row in zip(runs, selected)])
             # homography accuracy over 5 |Q| pairs, times in ms per query
             accuracy = markdown_table(
-                run_columns + ["valid", "acc 1px", "acc 3px", "acc 5px", "corner px",
-                               "T_cand ms", "T_verify ms", "T_total ms", "< C"],
+                run_columns + ["valid", "acc 1px", "acc 3px", "acc 5px", "mean corner px",
+                               "median corner px", "T_cand ms", "T_verify ms", "T_total ms",
+                               "< C"],
                 [run + [row["ValidHomographyRate"], row["AccurateHomographyRate1px"],
                         row["AccurateHomographyRate3px"], row["AccurateHomographyRate5px"],
-                        row["MeanCornerErrorPx"],
+                        row["MeanCornerErrorPx"], row["MedianCornerErrorPx"],
                         milliseconds(row["AverageCandidateTimeMs"]),
                         milliseconds(row["AverageVerificationTimeMs"]),
                         milliseconds(row["AverageTotalTimeMs"]), row["QueriesBelowC"]]

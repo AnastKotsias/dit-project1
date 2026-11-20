@@ -198,6 +198,15 @@ HomographyResult estimate_homography_ransac(
     // preserve the assignment's minimum-valid-inlier requirement
     if(final_inliers.size() < kMinimumSampleSize)
         return failure;
+    // many matches to one candidate keypoint: refit H collapses the query onto it
+    // degenerate estimate, not a valid homography
+    std::vector<PointCorrespondence> final_correspondences;
+    final_correspondences.reserve(final_inliers.size());
+    for(const std::size_t index : final_inliers)
+        final_correspondences.push_back(
+            {matches[index].query_point, matches[index].candidate_point});
+    if(!has_four_distinct_points(final_correspondences))
+        return failure;
 
     HomographyResult result = refit;
     result.inlier_indices = std::move(final_inliers);
