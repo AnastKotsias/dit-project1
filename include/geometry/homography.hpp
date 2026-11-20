@@ -29,6 +29,11 @@ struct HomographyResult {
 bool is_degenerate_sample(
     const std::vector<PointCorrespondence>& sample);
 
+// final inlier set check: at least four distinct, non-collinear points in each image
+// same repeated-point threshold as the minimal sample
+bool has_four_distinct_points(
+    const std::vector<PointCorrespondence>& correspondences);
+
 // normalized DLT result for a set of point correspondences
 // repeated points allowed for refits
 HomographyResult estimate_homography(

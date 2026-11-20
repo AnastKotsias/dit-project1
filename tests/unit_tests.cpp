@@ -1398,6 +1398,55 @@ void testHomographyEstimation() {
         {{0.0, 1000000.0}, {0.0, 1000000.0}}};
     check(image_search::is_degenerate_sample(nearly_collinear),
           "minimal sample check accepted a scale-normalized near-collinear sample");
+
+    // final inliers: four distinct points in each image
+    check(image_search::has_four_distinct_points(correspondences),
+          "inlier check rejected four distinct points");
+    // repeated inliers do not count twice
+    auto with_repeats = refit;
+    with_repeats.push_back(with_repeats.front());
+    check(image_search::has_four_distinct_points(with_repeats),
+          "inlier check rejected distinct points with a repeated one");
+    // many query points onto 3 candidate points, as with a hub keypoint
+    std::vector<image_search::PointCorrespondence> collapsed;
+    for(std::size_t index = 0; index < 50; ++index) {
+        const double x = static_cast<double>(index % 10) * 30.0;
+        const double y = static_cast<double>(index / 10) * 30.0;
+        collapsed.push_back({{x, y}, {100.0 + static_cast<double>(index % 3), 100.0}});
+    }
+    check(!image_search::has_four_distinct_points(collapsed),
+          "inlier check accepted three distinct candidate points");
+    // fourth point closer than 1e-5 px is a repeat
+    auto nearly_four = collapsed;
+    nearly_four.push_back({{400.0, 400.0}, {100.0, 100.0 + 1e-6}});
+    check(!image_search::has_four_distinct_points(nearly_four),
+          "inlier check accepted a point 1e-6 px from another");
+    auto four = collapsed;
+    four.push_back({{400.0, 400.0}, {150.0, 120.0}});
+    check(image_search::has_four_distinct_points(four),
+          "inlier check rejected a fourth distinct candidate point");
+    // four distinct but collinear points cannot define a stable homography
+    const std::vector<image_search::PointCorrespondence> collinear_inliers = {
+        {{0.0, 0.0}, {0.0, 0.0}},
+        {{1.0, 1.0}, {1.0, 1.0}},
+        {{2.0, 2.0}, {2.0, 2.0}},
+        {{3.0, 3.0}, {3.0, 3.0}}};
+    check(!image_search::has_four_distinct_points(collinear_inliers),
+          "inlier check accepted four collinear points");
+    // destination collinearity is invalid even when query points are well spread
+    const std::vector<image_search::PointCorrespondence> collinear_destination = {
+        {{0.0, 0.0}, {0.0, 0.0}},
+        {{1.0, 0.0}, {1.0, 1.0}},
+        {{0.0, 1.0}, {2.0, 2.0}},
+        {{1.0, 1.0}, {3.0, 3.0}}};
+    check(!image_search::has_four_distinct_points(collinear_destination),
+          "inlier check accepted a collinear destination set");
+    // the same check on the query side
+    auto one_source = correspondences;
+    for(auto& correspondence : one_source)
+        correspondence.source = {5.0, 5.0};
+    check(!image_search::has_four_distinct_points(one_source),
+          "inlier check accepted one repeated query point");
 }
 
 // Test deterministic RANSAC rejection and refitting with synthetic matches

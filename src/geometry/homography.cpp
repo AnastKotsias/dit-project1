@@ -112,6 +112,15 @@ bool has_duplicate_points(const std::vector<Point2>& points) {
     return false;
 }
 
+// keeps the point unless it repeats a kept one
+void keep_if_distinct(std::vector<Point2>& kept, const Point2& point) {
+    for(const auto& other : kept) {
+        if(squared_distance(other, point) < kMinimumPointSeparationSquared)
+            return;
+    }
+    kept.push_back(point);
+}
+
 bool has_collinear_triple(const std::vector<Point2>& points) {
     // collinear triples invalidate a four-point projective sample
     for(std::size_t first = 0; first < points.size(); ++first) {
@@ -132,6 +141,29 @@ bool has_collinear_triple(const std::vector<Point2>& points) {
         }
     }
     return false;
+}
+
+bool all_points_collinear(const std::vector<Point2>& points) {
+    if(points.size() < 3)
+        return true;
+
+    const Point2& first = points[0];
+    const Point2& second = points[1];
+    const double baseline_squared = squared_distance(first, second);
+    if(baseline_squared <= 0.0)
+        return true;
+
+    for(std::size_t index = 2; index < points.size(); ++index) {
+        const double maximum_squared_distance = std::max(
+            {baseline_squared, squared_distance(first, points[index]),
+             squared_distance(second, points[index])});
+        if(maximum_squared_distance > 0.0 &&
+           triangle_cross_product(first, second, points[index]) /
+                   maximum_squared_distance >=
+               kMinimumCollinearity)
+            return false;
+    }
+    return true;
 }
 
 bool is_invertible_homography(const Eigen::Matrix3d& homography) {
@@ -179,6 +211,24 @@ bool is_degenerate_sample(const std::vector<PointCorrespondence>& sample) {
     // collinear triple gives rank(A) < 8
     return has_collinear_triple(source_points) ||
            has_collinear_triple(destination_points);
+}
+
+bool has_four_distinct_points(
+    const std::vector<PointCorrespondence>& correspondences) {
+    // collect up to four distinct points per image
+    std::vector<Point2> source_points;
+    std::vector<Point2> destination_points;
+    for(const auto& correspondence : correspondences) {
+        if(!finite_point(correspondence.source) ||
+           !finite_point(correspondence.destination))
+            return false;
+        keep_if_distinct(source_points, correspondence.source);
+        keep_if_distinct(destination_points, correspondence.destination);
+    }
+    // all-collinear inliers cannot support a projective homography
+    return source_points.size() >= 4 && destination_points.size() >= 4 &&
+           !all_points_collinear(source_points) &&
+           !all_points_collinear(destination_points);
 }
 
 HomographyResult estimate_homography(
