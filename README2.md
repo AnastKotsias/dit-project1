@@ -332,6 +332,17 @@ which are common when several query descriptors match the same candidate
 keypoint, only repeat rows of `A`. Rejecting them would discard good
 consensus sets.
 
+The **final inliers** (after the refit) are checked once more. Without a
+cross-check, many query descriptors of an unrelated image can match one
+"hub" keypoint of the candidate. The refit then maps the whole query onto
+one or two points, so almost every match becomes an inlier. Such an `H`
+still passes `σ3/σ1 > 1e-12`. The final inliers must therefore contain at
+least **four distinct points** in each image (same `1e-5` px threshold),
+and those points must not all lie on one line (same `η ≥ 1e-4`). Otherwise
+verification fails. On validation this rejected most of the high-inlier
+distractors. The few relevant pairs it rejected had corner errors of about
+800 px, so the accurate homography rate did not change.
+
 ### 4.6 RANSAC (`estimate_homography_ransac`)
 
 - **Too few matches.** With fewer than four accepted matches, verification
@@ -529,6 +540,7 @@ estimate_ransac(matches, tau, Tmax, p, adaptive, seed):
     H <- normalized_DLT(best.inliers); if invalid(H): return FAILURE
     final <- {i : error(H, matches[i]) < tau}          # all matches again
     if |final| < 4: return FAILURE
+    if < 4 distinct points or all collinear in either image of final: return FAILURE
     return H, final, median error of final
 
 normalized_DLT(correspondences):
