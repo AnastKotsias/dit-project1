@@ -47,7 +47,8 @@ FIXED_T_VALUES=${FIXED_T_VALUES-"500 1000 2000 5000"}
 # test: the configuration frozen after validation, for every D
 TEST_D_VALUES=${TEST_D_VALUES-"1000 5000 10000 25000"}
 TEST_C_VALUES=${TEST_C_VALUES-"50"}
-TEST_RHO=${TEST_RHO:-0.8}
+# frozen after validation: C=50, rho=0.7, tau=3, T=2000, adaptive=1
+TEST_RHO=${TEST_RHO:-0.7}
 TEST_TAU=${TEST_TAU:-3}
 TEST_T=${TEST_T:-2000}
 TEST_ADAPTIVE=${TEST_ADAPTIVE:-1}

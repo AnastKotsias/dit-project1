@@ -473,10 +473,14 @@ second assignment cover:
 The study is submitted as a separate PDF report (up to 5 pages, IEEE
 two-column template).
 
-<!-- TODO: file name of the report, how the runs were made (scripts/commands),
-     the grid of C ∈ {20, 50, 100}, ρ, τ, Tmax with p = 0.99, the selected
-     configuration from validation, and the test runs for D ∈ {1000, 5000,
-     10000, 25000}, overall and for illumination/viewpoint. -->
+Validation runs are driven by
+[`scripts/verify_experiments.sh`](scripts/verify_experiments.sh) and use
+`C ∈ {20, 50, 100}`, `ρ ∈ {0.7, 0.75, 0.8, 0.85}`,
+`τ ∈ {1, 2, 3, 5}`, `Tmax ∈ {500, 1000, 2000, 5000}`, `p = 0.99`,
+and both adaptive modes. The frozen test configuration selected from the
+validation results is `C=50`, `ρ=0.7`, `τ=3`, `Tmax=2000`, `p=0.99`,
+`adaptive=1`; the test driver evaluates it for
+`D ∈ {1000, 5000, 10000, 25000}`.
 
 ## 6. Pseudocode
 
