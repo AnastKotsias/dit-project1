@@ -11,5 +11,5 @@ MIRFlickr-25K/
 /output.txt
 /ASSIGNMENT2_PLAN.md
 /results/cache/
-/results/verify/
+/results/**/*.log
 __pycache__/
